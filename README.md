@@ -6,6 +6,7 @@ A CLI tool for Azure VM cost optimization with intelligent rightsizing recommend
 ![Python](https://img.shields.io/badge/Python-3.9+-3776AB?style=for-the-badge&logo=python)
 ![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
 
+
 ```
     ███████╗██╗  ██╗ █████╗ ███████╗██╗    ██╗   ██╗ ██████╗ ██╗  ██╗
     ██╔════╝██║ ██╔╝██╔══██╗██╔════╝██║    ██║   ██║██╔═══██╗╚██╗██╔╝
@@ -14,6 +15,11 @@ A CLI tool for Azure VM cost optimization with intelligent rightsizing recommend
     ███████║██║  ██╗██║  ██║███████╗███████╗╚████╔╝ ╚██████╔╝██╔╝ ██╗
     ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚══════╝ ╚═══╝   ╚═════╝ ╚═╝  ╚═╝
 ```
+
+![Skelvox start](docs/images/skelvoxstart.png)
+
+
+![SKU Availability Check](docs/images/check-availability.png)
 
 ## Why "Skælvox"?
 

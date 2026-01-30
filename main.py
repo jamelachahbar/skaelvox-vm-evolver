@@ -1699,14 +1699,14 @@ def select_subscriptions(subscriptions: list) -> bool:
     import questionary
     from questionary import Style
     
-    # Custom style
+    # Subtle inverse bar style
     custom_style = Style([
-        ('qmark', 'fg:magenta bold'),
-        ('question', 'fg:cyan bold'),
-        ('answer', 'fg:green bold'),
-        ('pointer', 'fg:magenta bold'),
-        ('highlighted', 'fg:magenta bold'),
-        ('selected', 'fg:green'),
+        ('qmark', 'fg:#888888'),
+        ('question', 'fg:#ffffff bold'),
+        ('answer', 'fg:#88cc88'),
+        ('pointer', 'fg:#ffffff bold'),
+        ('highlighted', 'bg:#444444 fg:#ffffff'),
+        ('selected', 'fg:#88cc88'),
     ])
     
     # Build choices - add "All" option at top
@@ -1812,14 +1812,14 @@ def interactive_menu():
             console.print(f"[dim]📍 Active: {len(subs)} subscriptions selected[/dim]")
         console.print()
     
-    # Custom style for questionary
+    # Subtle inverse bar style (less harsh than bright cyan)
     custom_style = Style([
-        ('qmark', 'fg:magenta bold'),
-        ('question', 'fg:cyan bold'),
-        ('answer', 'fg:green bold'),
-        ('pointer', 'fg:magenta bold'),
-        ('highlighted', 'fg:magenta bold'),
-        ('selected', 'fg:green'),
+        ('qmark', 'fg:#888888'),
+        ('question', 'fg:#ffffff bold'),
+        ('answer', 'fg:#88cc88'),
+        ('pointer', 'fg:#ffffff bold'),
+        ('highlighted', 'bg:#444444 fg:#ffffff'),
+        ('selected', 'fg:#88cc88'),
     ])
     
     # Build choices for questionary
