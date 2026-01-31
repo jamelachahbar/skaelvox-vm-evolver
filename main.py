@@ -56,62 +56,69 @@ load_dotenv()
 
 # Initialize
 app = typer.Typer(
-    name="azure-vm-rightsizer",
-    help="🔧 Azure VM Rightsizing CLI - Analyze and optimize your Azure VM costs",
+    name="skaelvox",
+    help="""🦎 Skælvox VM Evolver - Azure VM Cost Optimization
+
+Analyze your Azure VMs and get intelligent rightsizing recommendations.
+
+[bold]Quick Start:[/bold]
+  Run without arguments for interactive mode:
+    python main.py
+
+  Or analyze directly:
+    python main.py analyze -s <subscription-id>
+
+[bold]Common Commands:[/bold]
+  analyze        Scan VMs for cost savings
+  rank-skus      Find best SKU for your needs  
+  examples       Show usage examples""",
     add_completion=False,
+    rich_markup_mode="rich",
+    no_args_is_help=False,
 )
 console = Console()
 
+# Track if we're in interactive mode (to skip repeated headers)
+_interactive_mode = False
+_header_shown = False
 
-def create_header():
-    """Create a clean, HydroToDo-inspired terminal header."""
-    from datetime import datetime
-    now = datetime.now()
+
+def create_header(compact: bool = False, force: bool = False):
+    """Create a clean terminal header inspired by Claude CLI.
     
-    # ASCII Art Title - clean and centered
-    title_lines = [
-        "███████╗██╗  ██╗ █████╗ ███████╗██╗    ██╗   ██╗ ██████╗ ██╗  ██╗",
-        "██╔════╝██║ ██╔╝██╔══██╗██╔════╝██║    ██║   ██║██╔═══██╗╚██╗██╔╝",
-        "███████╗█████╔╝ ███████║█████╗  ██║    ██║   ██║██║   ██║ ╚███╔╝ ",
-        "╚════██║██╔═██╗ ██╔══██║██╔══╝  ██║    ╚██╗ ██╔╝██║   ██║ ██╔██╗ ",
-        "███████║██║  ██╗██║  ██║███████╗███████╗╚████╔╝ ╚██████╔╝██╔╝ ██╗",
-        "╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚══════╝ ╚═══╝   ╚═════╝ ╚═╝  ╚═╝",
-    ]
+    Args:
+        compact: If True, show a minimal header without ASCII art
+        force: If True, show header even in interactive mode
+    """
+    global _header_shown
     
+    # In interactive mode, skip header after first show (unless forced)
+    if _interactive_mode and _header_shown and not force:
+        return
+    
+    _header_shown = True
     console.print()
     
-    # Print centered ASCII art with gradient effect
-    for i, line in enumerate(title_lines):
-        # Gradient from bright_green to bright_cyan
-        if i < 2:
-            style = "bold bright_green"
-        elif i < 4:
-            style = "bold bright_cyan"
-        else:
-            style = "bold bright_blue"
-        console.print(f"  {line}", style=style)
+    if compact:
+        # Compact header for subcommands - just a simple line
+        console.print("  [bold bright_cyan]🦎 Skælvox VM Evolver[/] [dim]v1.0.0[/]")
+        console.print()
+        return
     
-    # Subtitle with version
-    console.print()
-    console.print("                    ╭─────────────────────────────────────────╮", style="dim")
-    console.print("                    │   [bold bright_white]VM EVOLVER[/] [dim]v1.0.0[/]  │  [bright_green]●[/] [dim]Ready[/]   │", style="dim")
-    console.print("                    ╰─────────────────────────────────────────╯", style="dim")
-    console.print()
+    # Clean ASCII Art Logo - prominent like Claude CLI
+    logo = r"""
+    [bold bright_green]███████╗[/][bold bright_cyan]██╗  ██╗[/] [bold bright_green]█████╗[/] [bold bright_cyan]███████╗██╗[/]   [bold bright_green]██╗   ██╗[/] [bold bright_cyan]██████╗[/] [bold bright_green]██╗  ██╗[/]
+    [bold bright_green]██╔════╝[/][bold bright_cyan]██║ ██╔╝[/][bold bright_green]██╔══██╗[/][bold bright_cyan]██╔════╝██║[/]   [bold bright_green]██║   ██║[/][bold bright_cyan]██╔═══██╗[/][bold bright_green]╚██╗██╔╝[/]
+    [bold bright_cyan]███████╗█████╔╝[/] [bold bright_green]███████║[/][bold bright_cyan]█████╗[/]  [bold bright_green]██║[/]   [bold bright_cyan]██║   ██║██║   ██║[/] [bold bright_green]╚███╔╝[/]
+    [bold bright_cyan]╚════██║██╔═██╗[/] [bold bright_green]██╔══██║[/][bold bright_cyan]██╔══╝[/]  [bold bright_green]██║[/]   [bold bright_cyan]╚██╗ ██╔╝██║   ██║[/] [bold bright_green]██╔██╗[/]
+    [bold bright_green]███████║[/][bold bright_cyan]██║  ██╗██║  ██║[/][bold bright_green]███████╗███████╗[/][bold bright_cyan]╚████╔╝[/] [bold bright_green]╚██████╔╝[/][bold bright_cyan]██╔╝ ██╗[/]
+    [bold bright_cyan]╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝[/][bold bright_green]╚══════╝╚══════╝[/] [bold bright_cyan]╚═══╝[/]   [bold bright_green]╚═════╝[/] [bold bright_cyan]╚═╝  ╚═╝[/]
+"""
+    console.print(logo)
     
-    # Feature bar - minimalist icons
-    features = [
-        ("[bright_green]◆[/]", "Cost Optimization"),
-        ("[bright_cyan]◆[/]", "Gen Upgrade"),  
-        ("[bright_yellow]◆[/]", "AI Analysis"),
-        ("[bright_magenta]◆[/]", "SKU Ranking"),
-    ]
-    feature_str = "   ".join([f"{icon} [dim]{name}[/]" for icon, name in features])
-    console.print(f"       {feature_str}")
-    
-    # Timestamp line
-    console.print()
-    console.print(f"  [dim]{'─' * 72}[/]")
-    console.print(f"  [dim]{now.strftime('%Y-%m-%d %H:%M:%S')} │ Azure FinOps & VM Rightsizing Tool[/]")
+    # Clean subtitle - simple and elegant
+    console.print("    [dim]────────────────────────────────────────────────────────────────────────[/]")
+    console.print("    [bold]VM Evolver[/] [dim]v1.0.0[/]  │  [dim]Azure VM Cost Optimization & Rightsizing[/]")
     console.print()
 
 
@@ -223,6 +230,7 @@ def create_vm_table(results: list[RightsizingResult], limit: int = 20) -> Table:
     table.add_column("Type", style="cyan")
     table.add_column("Monthly Savings", justify="right", style="green")
     table.add_column("Priority", justify="center")
+    table.add_column("Allocation", justify="center")  # Placement Score
     table.add_column("Valid", justify="center")
     
     for result in results[:limit]:
@@ -252,6 +260,17 @@ def create_vm_table(results: list[RightsizingResult], limit: int = 20) -> Table:
         else:
             valid_text = "[dim]-[/dim]"
         
+        # Placement score with color
+        placement_score = result.placement_score
+        if placement_score == "High":
+            allocation_text = "[green]🟢 High[/green]"
+        elif placement_score == "Medium":
+            allocation_text = "[yellow]🟡 Med[/yellow]"
+        elif placement_score == "Low":
+            allocation_text = "[red]🔴 Low[/red]"
+        else:
+            allocation_text = "[dim]-[/dim]"
+        
         table.add_row(
             result.vm.name,
             result.vm.resource_group[:18] + "..." if len(result.vm.resource_group) > 20 else result.vm.resource_group,
@@ -260,13 +279,14 @@ def create_vm_table(results: list[RightsizingResult], limit: int = 20) -> Table:
             result.recommendation_type or "-",
             savings_text,
             priority_text,
+            allocation_text,
             valid_text,
         )
     
     if len(results) > limit:
         table.add_row(
             f"[dim]... and {len(results) - limit} more VMs[/dim]",
-            "", "", "", "", "", "", ""
+            "", "", "", "", "", "", "", ""
         )
     
     return table
@@ -356,7 +376,18 @@ def create_detailed_result_panel(result: RightsizingResult) -> Panel:
         alts = "[bold cyan]📊 Top Alternative SKUs (by score)[/bold cyan]\n"
         for i, alt in enumerate(result.ranked_alternatives[:5], 1):
             valid_icon = "✅" if alt.get("is_valid", True) else "⚠️"
-            alts += f"  {i}. {valid_icon} {alt['sku']} - Score: {alt['score']}, {format_currency(alt['monthly_price'])}/mo"
+            # Placement score indicator
+            placement = alt.get("placement_score", "")
+            if placement == "High":
+                placement_text = "[green]🟢[/green]"
+            elif placement == "Medium":
+                placement_text = "[yellow]🟡[/yellow]"
+            elif placement == "Low":
+                placement_text = "[red]🔴[/red]"
+            else:
+                placement_text = ""
+            
+            alts += f"  {i}. {valid_icon} {alt['sku']} {placement_text} - Score: {alt['score']}, {format_currency(alt['monthly_price'])}/mo"
             if alt['savings'] > 0:
                 alts += f" [green](save {format_currency(alt['savings'])})[/green]"
             alts += f"\n     {alt['vcpus']} vCPUs, {alt['memory_gb']}GB RAM, {alt['generation']}"
@@ -386,6 +417,26 @@ def create_detailed_result_panel(result: RightsizingResult) -> Panel:
             constraints += "  [dim]Consider using validated alternatives or request quota increase[/dim]\n"
         
         sections.append(constraints)
+    
+    # Placement Score section (if available and concerning)
+    if result.placement_score != "Unknown":
+        if result.placement_score == "High":
+            placement_section = f"""[bold cyan]🎯 Deployment Allocation Score[/bold cyan]
+  • Score: [green]🟢 High[/green] - Very likely to succeed
+  • The recommended SKU has good capacity availability in {vm.location}
+"""
+        elif result.placement_score == "Medium":
+            placement_section = f"""[bold cyan]🎯 Deployment Allocation Score[/bold cyan]
+  • Score: [yellow]🟡 Medium[/yellow] - May succeed
+  • Consider having a backup plan for {vm.location}
+"""
+        else:  # Low
+            placement_section = f"""[bold cyan]⚠️ Deployment Allocation Score[/bold cyan]
+  • Score: [red]🔴 Low[/red] - Unlikely to succeed
+  • [red bold]Warning: The recommended SKU may have capacity issues in {vm.location}![/red bold]
+  • Consider choosing a different region or alternative SKU
+"""
+        sections.append(placement_section)
     
     content = "\n".join(sections)
     
@@ -573,6 +624,7 @@ def analyze(
             ai_analyzer=ai_analyzer,
             settings=settings,
             validate_constraints=not no_validation,
+            check_placement_scores=settings.check_placement_scores,
             max_workers=workers,
         )
         
@@ -1767,7 +1819,7 @@ def azure_login_flow():
                     "id": sub.subscription_id,
                     "name": sub.display_name,
                     "state": sub.state,
-                    "tenant_id": sub.tenant_id,
+                    "tenant_id": getattr(sub, 'tenant_id', None),
                 })
         
         if not subscriptions:
@@ -1793,7 +1845,7 @@ def azure_login_flow():
                     "id": sub.subscription_id,
                     "name": sub.display_name,
                     "state": sub.state,
-                    "tenant_id": sub.tenant_id,
+                    "tenant_id": getattr(sub, 'tenant_id', None),
                 })
             
             if subscriptions:
@@ -1811,7 +1863,7 @@ def azure_login_flow():
 
 
 def select_subscriptions(subscriptions: list) -> bool:
-    """Let user select one, multiple, or all subscriptions using keyboard."""
+    """Let user select one or all subscriptions using keyboard."""
     import questionary
     from questionary import Style
     
@@ -1825,51 +1877,53 @@ def select_subscriptions(subscriptions: list) -> bool:
         ('selected', 'fg:#88cc88'),
     ])
     
-    # Build choices - add "All" option at top
-    choices = ["🌐 ALL SUBSCRIPTIONS (whole tenant)"]
+    # Build choices - simple list with ALL option at top
+    ALL_SUBS_KEY = "__ALL__"
+    choices = [{"name": f"🌐 ALL SUBSCRIPTIONS ({len(subscriptions)} total)", "value": ALL_SUBS_KEY}]
+    
     for sub in subscriptions:
-        state_icon = "✅" if sub["state"] == "Enabled" else "⚠️"
-        choices.append(f"{state_icon} {sub['name']} ({sub['id'][:8]}...)")
+        state_icon = "✅" if sub.get("state") == "Enabled" else "⚠️"
+        choices.append({
+            "name": f"{state_icon} {sub['name']}",
+            "value": sub['id']
+        })
     
-    console.print("\n[dim]Use ↑↓ arrows to navigate, Space to select multiple, Enter to confirm[/dim]\n")
+    console.print("\n[dim]Use ↑↓ to navigate, Enter to select[/dim]\n")
     
-    # Use checkbox for multi-select
-    answers = questionary.checkbox(
-        "🦎 Select subscription(s):",
+    # Use select for simpler single-choice UX
+    answer = questionary.select(
+        "🦎 Select subscription:",
         choices=choices,
         style=custom_style,
         qmark="",
+        pointer="▶",
     ).ask()
     
-    if answers is None:
+    if answer is None:
         return False
     
     selected = []
     
     # Check if "ALL" was selected
-    if choices[0] in answers:
+    if answer == ALL_SUBS_KEY:
         selected = subscriptions.copy()
         console.print(f"\n[green]✅ Selected ALL {len(selected)} subscription(s)[/green]")
     else:
-        # Map selected choices back to subscriptions
-        for answer in answers:
-            # Extract subscription by matching (skip the icon)
-            for sub in subscriptions:
-                if sub['name'] in answer:
-                    selected.append(sub)
-                    break
+        # Find the selected subscription
+        for sub in subscriptions:
+            if sub['id'] == answer:
+                selected.append(sub)
+                break
     
     if not selected:
-        # If nothing selected, default to first
         console.print("[yellow]No selection made. Using first subscription.[/yellow]")
         selected = [subscriptions[0]]
     
     _interactive_state["selected_subscriptions"] = selected
     
     # Show selected
-    if len(selected) <= 5:
-        names = ", ".join([s["name"] for s in selected])
-        console.print(f"[green]🦎 Selected: {names}[/green]\n")
+    if len(selected) == 1:
+        console.print(f"[green]🦎 Selected: {selected[0]['name']}[/green]\n")
     else:
         console.print(f"[green]🦎 Selected {len(selected)} subscriptions[/green]\n")
     
@@ -1889,33 +1943,107 @@ def get_first_subscription_id() -> str:
     return os.environ.get("AZURE_SUBSCRIPTION_ID", "")
 
 
+def show_quick_start():
+    """Show a quick start guide for new users."""
+    quick_start = """
+[bold bright_cyan]🚀 QUICK START[/]
+
+[bold]Most users start here:[/]
+  [bright_green]→[/] [bold]Analyze VMs[/] - Scan your subscription for cost savings
+  
+[dim]Pro tip: Run without arguments anytime to return to this menu[/dim]
+"""
+    console.print(Panel(quick_start, border_style="cyan", box=box.ROUNDED, padding=(0, 2)))
+
+
+def draw_main_screen():
+    """Draw the main screen with fixed header like Claude CLI."""
+    console.clear()
+    
+    # Fixed header box - like Claude CLI
+    from rich.table import Table
+    from rich.panel import Panel
+    from rich.text import Text
+    from rich import box
+    
+    # Get subscription info
+    sub_info = ""
+    if _interactive_state.get("selected_subscriptions"):
+        subs = _interactive_state["selected_subscriptions"]
+        if len(subs) == 1:
+            sub_info = subs[0]['name']
+        else:
+            sub_info = f"{len(subs)} subscriptions"
+    
+    # Simple clean lizard emoji + styled text (no ASCII art mess)
+    header_left = f"""[bold bright_cyan]🦎 Skælvox VM Evolver[/] [dim]v1.0.0[/]
+
+[dim]Azure VM Cost Optimization[/dim]
+[dim]& Rightsizing Tool[/dim]
+
+[dim]Subscription:[/dim]
+[cyan]{sub_info or 'Not selected'}[/cyan]"""
+
+    header_right = """[yellow]Quick Start[/yellow]
+[dim]• Analyze VMs → Get recommendations
+• Export to HTML, CSV, or JSON
+• Check SKU availability[/dim]
+
+[yellow]Navigation[/yellow]
+[dim]• ↑↓ Navigate  • Enter Select
+• Ctrl+C Exit[/dim]"""
+
+    # Create a two-column header
+    header_table = Table.grid(padding=(0, 6))
+    header_table.add_column(width=35)
+    header_table.add_column(width=40)
+    header_table.add_row(header_left, header_right)
+    
+    console.print(Panel(header_table, border_style="bright_cyan", box=box.ROUNDED))
+    console.print()
+
+
 def interactive_menu():
     """Show an interactive menu for the CLI using a loop (no recursion)."""
+    global _interactive_mode
+    _interactive_mode = True
+    
     import questionary
     from questionary import Style
 
+    # Initial screen with full header
     create_header()
+    show_quick_start()
 
     # First, handle Azure login
     if not _interactive_state.get("logged_in"):
         if not azure_login_flow():
             console.print("\n[yellow]Continuing without Azure login...[/yellow]")
             console.print("[dim]Some features may require manual subscription input.[/dim]\n")
+    
+    # After login, draw the main screen
+    draw_main_screen()
 
-    # Menu options - (key, display_name, command, description)
+    # Menu options - GROUPED logically with separators
+    # (key, display_name, command, description, is_separator)
     menu_items = [
-        ("1", "🔍 Analyze VMs", "analyze", "Full VM analysis with rightsizing recommendations"),
-        ("2", "🌍 Compare Regions", "compare-regions", "Find cheaper regions for your VMs"),
-        ("3", "📊 Rank SKUs", "rank-skus", "Compare and rank VM SKUs"),
-        ("4", "📜 Show Generations", "show-generations", "View generation upgrade paths"),
-        ("5", "🔒 Show Constraints", "show-constraints", "View SKU constraints for a region"),
-        ("6", "📊 Check Quota", "check-quota", "Check VM quota usage"),
-        ("7", "✅ Validate SKU", "validate-sku", "Validate SKU deployment"),
-        ("8", "🔍 Check Capacity", "check-capacity", "Check available SKU capacity"),
-        ("9", "🔍 Check Availability", "check-availability", "Check SKU availability with zones"),
-        ("10", "🌍 Multi-Region Availability", "check-availability-multi", "Check SKU across regions"),
-        ("11", "🔄 Find Alternatives", "find-alternatives", "Find similar SKUs"),
+        # --- Main Actions ---
+        ("1", "🔍 Analyze VMs", "analyze", "Scan VMs and get rightsizing recommendations"),
+        ("2", "🌍 Compare Regions", "compare-regions", "Find cheaper regions for a VM"),
+        ("3", "📊 Rank SKUs", "rank-skus", "Find best SKU for your requirements"),
+        # --- SKU Tools ---
+        ("sep1", "─── SKU Tools ───", None, None),
+        ("4", "✅ Validate SKU", "validate-sku", "Check if a SKU can be deployed"),
+        ("5", "🔄 Find Alternatives", "find-alternatives", "Find similar SKUs"),
+        ("6", "🔍 Check Availability", "check-availability", "Check SKU availability by zone"),
+        # --- Reference ---
+        ("sep2", "─── Reference ───", None, None),
+        ("7", "📜 Generation Map", "show-generations", "View generation upgrade paths"),
+        ("8", "📊 Check Quota", "check-quota", "View your quota usage"),
+        # --- Settings ---
+        ("sep3", "─────────────────", None, None),
         ("C", "🔄 Change Subscription", "change-sub", "Select different subscription(s)"),
+        ("?", "📚 Examples", "examples", "Show usage examples"),
         ("0", "❌ Exit", "exit", "Exit the CLI"),
     ]
 
@@ -1927,26 +2055,25 @@ def interactive_menu():
         ('pointer', 'fg:#ffffff bold'),
         ('highlighted', 'bg:#444444 fg:#ffffff'),
         ('selected', 'fg:#88cc88'),
+        ('separator', 'fg:#666666'),
     ])
 
-    # Build choices for questionary
-    choices = [f"{item[1]} - {item[3]}" for item in menu_items]
+    # Build choices for questionary - include separators as disabled
+    choices = []
+    selectable_items = []  # Track only selectable items for mapping
+    for item in menu_items:
+        if item[2] is None:  # Separator
+            choices.append(questionary.Separator(f"  {item[1]}"))
+        else:
+            choices.append(f"{item[1]} - {item[3]}")
+            selectable_items.append(item)
 
     while True:
-        # Show current subscription info
-        if _interactive_state.get("selected_subscriptions"):
-            subs = _interactive_state["selected_subscriptions"]
-            if len(subs) == 1:
-                console.print(f"[dim]📍 Active: {subs[0]['name']}[/dim]")
-            else:
-                console.print(f"[dim]📍 Active: {len(subs)} subscriptions selected[/dim]")
-            console.print()
-
-        console.print("[dim]Use ↑↓ arrows to navigate, Enter to select[/dim]\n")
+        console.print("[dim]Use ↑↓ to navigate, Enter to select[/dim]\n")
 
         # Get user choice using keyboard navigation
         answer = questionary.select(
-            "🦎 Choose your evolution:",
+            "🦎 What would you like to do?",
             choices=choices,
             style=custom_style,
             qmark="",
@@ -1956,15 +2083,22 @@ def interactive_menu():
         if answer is None:
             # User pressed Ctrl+C
             console.print("\n[bold magenta]🦎 The Skælvox rests... Goodbye! ✨[/bold magenta]\n")
-            raise typer.Exit(0)
+            sys.exit(0)
 
-        # Find selected item by matching the display string
-        selected_idx = choices.index(answer)
-        selected = menu_items[selected_idx]
+        # Find selected item by matching the display string in selectable items
+        selected = None
+        for item in selectable_items:
+            display = f"{item[1]} - {item[3]}"
+            if display == answer:
+                selected = item
+                break
+        
+        if selected is None:
+            continue  # Skip if somehow a separator was selected
 
         if selected[0] == "0":
             console.print("\n[bold magenta]🦎 The Skælvox rests... Goodbye! ✨[/bold magenta]\n")
-            raise typer.Exit(0)
+            sys.exit(0)
 
         if selected[2] == "change-sub":
             # Change subscription
@@ -1975,7 +2109,7 @@ def interactive_menu():
             continue
 
         command = selected[2]
-        console.print(f"\n[bold green]🦎 Evolving to: {selected[1]}[/bold green]\n")
+        console.print(f"\n[bold green]🦎 {selected[1]}[/bold green]\n")
 
         # Gather parameters based on command
         try:
@@ -1989,24 +2123,27 @@ def interactive_menu():
                 # No parameters needed
                 sys.argv = ["main.py", "show-generations"]
                 app()
-            elif command == "show-constraints":
-                run_interactive_show_constraints()
             elif command == "check-quota":
                 run_interactive_check_quota()
             elif command == "validate-sku":
                 run_interactive_validate_sku()
-            elif command == "check-capacity":
-                run_interactive_check_capacity()
             elif command == "check-availability":
                 run_interactive_check_availability()
-            elif command == "check-availability-multi":
-                run_interactive_check_availability_multi()
             elif command == "find-alternatives":
                 run_interactive_find_alternatives()
+            elif command == "examples":
+                sys.argv = ["main.py", "examples"]
+                app()
         except SystemExit:
             pass  # Typer raises SystemExit after commands; continue the menu loop
 
-        console.print()  # Add spacing before next menu iteration
+        # Pause before showing menu again
+        console.print()
+        console.print("[dim]─" * 60 + "[/dim]")
+        input("\n  Press Enter to continue...")
+        
+        # Redraw the main screen with header
+        draw_main_screen()
 
 
 def run_interactive_analyze():
@@ -2034,6 +2171,13 @@ def run_interactive_analyze():
     use_ai = Confirm.ask("[cyan]Enable AI-powered analysis?[/cyan]", default=True)
     detailed = Confirm.ask("[cyan]Show detailed results?[/cyan]", default=False)
     
+    # Export options
+    export_report = Confirm.ask("[cyan]Export report to file?[/cyan]", default=False)
+    output_file = ""
+    if export_report:
+        console.print("[dim]  Formats: .html (visual), .csv (Excel), .json (data)[/dim]")
+        output_file = Prompt.ask("[cyan]  Output filename[/cyan]", default="report.html")
+    
     # Run for each subscription
     for sub_id in selected_subs:
         if len(selected_subs) > 1:
@@ -2047,6 +2191,17 @@ def run_interactive_analyze():
             args.append("--no-ai")
         if detailed:
             args.append("--detailed")
+        actual_output_file = None
+        if output_file:
+            # For multiple subs, add sub name to filename
+            if len(selected_subs) > 1:
+                base, ext = os.path.splitext(output_file)
+                sub_name = next((s["name"] for s in _interactive_state.get("selected_subscriptions", []) if s["id"] == sub_id), sub_id[:8])
+                safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in sub_name)
+                actual_output_file = f"{base}_{safe_name}{ext}"
+            else:
+                actual_output_file = output_file
+            args.extend(["-o", actual_output_file])
         
         console.print(f"[dim]Running: {' '.join(args)}[/dim]\n")
         sys.argv = args
@@ -2054,6 +2209,17 @@ def run_interactive_analyze():
             app()
         except SystemExit:
             pass  # Continue to next subscription
+        
+        # Show clickable link to the report if generated
+        if actual_output_file:
+            full_path = os.path.abspath(actual_output_file)
+            if os.path.exists(full_path):
+                console.print()
+                console.print(f"[bold green]📄 Report generated:[/bold green]")
+                # Use file:// URL for clickable link in terminal
+                file_url = f"file:///{full_path.replace(os.sep, '/')}"
+                console.print(f"   [link={file_url}]{full_path}[/link]")
+                console.print(f"   [dim](Ctrl+Click to open)[/dim]")
 
 
 def run_interactive_compare_regions():
@@ -2224,163 +2390,82 @@ def examples():
     
     Displays practical examples for various use cases.
     """
-    create_header()
-    
+    # Concise examples - most common use cases first
     examples_text = """
-# 📚 Skælvox VM Evolver - Usage Examples
+# 🦎 Skælvox VM Evolver - Quick Reference
 
-## Basic Analysis
+## 🚀 Get Started (Most Common)
 
-### Analyze all VMs in a subscription
 ```bash
-python main.py analyze --subscription <sub-id>
-```
+# Interactive mode - guided experience
+python main.py
 
-### Analyze with specific filters
-```bash
-# Filter by resource group
-python main.py analyze -s <sub-id> -g production-rg
+# Quick scan of all VMs
+python main.py analyze -s <subscription-id>
 
-# Show only high-priority recommendations
-python main.py analyze -s <sub-id> --priority High
-
-# Show only VMs with savings >= $50/month
-python main.py analyze -s <sub-id> --min-savings 50
-
-# Combine filters
-python main.py analyze -s <sub-id> --priority High --min-savings 100
-```
-
-## Export Options
-
-### Export to different formats (auto-detected by extension)
-```bash
-# Export to JSON (structured data)
-python main.py analyze -s <sub-id> -o results.json
-
-# Export to CSV (Excel-compatible)
-python main.py analyze -s <sub-id> -o results.csv
-
-# Export to HTML (rich visual report)
-python main.py analyze -s <sub-id> -o results.html
-```
-
-### Force specific format
-```bash
-python main.py analyze -s <sub-id> -o report --format html
-```
-
-## Advanced Analysis
-
-### Fast analysis (skip metrics and AI)
-```bash
+# Quick scan with fast mode (no metrics/AI)
 python main.py analyze -s <sub-id> --no-metrics --no-ai
 ```
 
-### Detailed per-VM analysis
+## 📊 Analysis Options
+
 ```bash
-python main.py analyze -s <sub-id> --detailed --top 10
+# Filter by resource group
+python main.py analyze -s <sub-id> -g my-resource-group
+
+# High-value opportunities only
+python main.py analyze -s <sub-id> --min-savings 100 --priority High
+
+# Detailed view with AI insights
+python main.py analyze -s <sub-id> --detailed
 ```
 
-### Control Skælvox generation evolution
+## 📁 Export Reports
+
 ```bash
-# Conservative: 1-generation leap (v3 → v4)
+# HTML (rich visual report - great for sharing)
+python main.py analyze -s <sub-id> -o report.html
+
+# CSV (Excel-compatible)
+python main.py analyze -s <sub-id> -o report.csv
+
+# JSON (for automation)
+python main.py analyze -s <sub-id> -o report.json
+```
+
+## 🦎 Skælvox Evolution Control
+
+```bash
+# Conservative: 1-gen leap (v3 → v4)
 python main.py analyze -s <sub-id> --leap 1
 
-# Aggressive: 3-generation leap (v3 → v6)
+# Aggressive: 3-gen leap (v3 → v6)
 python main.py analyze -s <sub-id> --leap 3
 
-# Strict mode: Only recommend target generation (no fallback)
-python main.py analyze -s <sub-id> --no-fallback
-
-# Disable generation evolution entirely
+# Disable generation evolution
 python main.py analyze -s <sub-id> --no-evolve
 ```
 
-### Adjust concurrent processing
+## 🔍 SKU Tools
+
 ```bash
-# Use more workers for faster analysis (default: 10)
-python main.py analyze -s <sub-id> --workers 20
+# Check if SKU is available
+python main.py validate-sku --sku Standard_D4s_v5 -r eastus
 
-# Use fewer workers for slower connections
-python main.py analyze -s <sub-id> --workers 5
+# Find similar SKUs
+python main.py find-alternatives --sku Standard_D4s_v5 -r eastus
+
+# Compare SKUs for requirements
+python main.py rank-skus -c 4 -m 16 -r westeurope
 ```
 
-## SKU Operations
-
-### Check SKU availability
-```bash
-python main.py check-availability --sku Standard_D16ds_v5 --region eastus2
-```
-
-### Find alternative SKUs
-```bash
-python main.py find-alternatives --sku Standard_D16ds_v5 --region eastus2 --min-similarity 70
-```
-
-### Compare regions for a VM
-```bash
-python main.py compare-regions --vm web-server-01 --resource-group production-rg
-```
-
-### Rank SKUs by specifications
-```bash
-python main.py rank-skus --vcpus 4 --memory 16 --region westeurope
-```
-
-## Automation & CI/CD
-
-### GitHub Actions workflow example
-```yaml
-- name: Analyze VMs
-  run: |
-    python main.py analyze \\
-      -s ${{ secrets.AZURE_SUBSCRIPTION_ID }} \\
-      --no-ai \\
-      --output results.csv
-```
-
-### Scheduled analysis with email
-```bash
-# cron job example (daily at 6 AM)
-0 6 * * * cd /path/to/tool && \\
-  python main.py analyze -s <sub-id> -o /reports/$(date +\\%Y\\%m\\%d).html && \\
-  mail -s "Azure VM Report" user@example.com < /reports/$(date +\\%Y\\%m\\%d).html
-```
-
-## Tips & Best Practices
-
-### 1. Start with a quick scan
-```bash
-python main.py analyze -s <sub-id> --no-metrics --top 20
-```
-
-### 2. Export to HTML for management reports
-```bash
-python main.py analyze -s <sub-id> -o executive-report.html
-```
-
-### 3. Export to CSV for detailed analysis in Excel
-```bash
-python main.py analyze -s <sub-id> -o detailed-analysis.csv
-```
-
-### 4. Focus on high-value optimizations
-```bash
-python main.py analyze -s <sub-id> --min-savings 100 --priority High
-```
-
-### 5. Test recommendations in a specific resource group first
-```bash
-python main.py analyze -s <sub-id> -g dev-rg --detailed
-```
-
-For more information, visit: https://github.com/jamelachahbar/skaelvox-vm-evolver
+---
+[dim]Tip: Run 'python main.py' without arguments for interactive mode[/dim]
 """
     
     console.print(Panel(
         Markdown(examples_text),
-        title="[bold cyan]📚 Usage Examples[/bold cyan]",
+        title="[bold cyan]📚 Quick Reference[/bold cyan]",
         border_style="cyan",
         box=box.ROUNDED,
         padding=(1, 2),

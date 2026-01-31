@@ -117,6 +117,7 @@ class ReportExporter:
                 "Savings %",
                 "Recommendation Type",
                 "Priority",
+                "Allocation Score",
                 "Confidence",
                 "Avg CPU %",
                 "Max CPU %",
@@ -156,6 +157,7 @@ class ReportExporter:
                     f"{savings_pct:.1f}%",
                     result.recommendation_type or "N/A",
                     result.priority,
+                    getattr(result, 'placement_score', 'Unknown'),
                     confidence,
                     f"{vm.avg_cpu:.1f}" if vm.avg_cpu else "N/A",
                     f"{vm.max_cpu:.1f}" if vm.max_cpu else "N/A",
@@ -958,6 +960,7 @@ class ReportExporter:
                         <th class="sortable" data-col="4" onclick="sortTable(4)">Type</th>
                         <th class="sortable" data-col="5" onclick="sortTable(5, 'number')">Est. Savings</th>
                         <th class="sortable" data-col="6" onclick="sortTable(6)">Priority</th>
+                        <th class="sortable" data-col="7" onclick="sortTable(7)">Allocation</th>
                         <th>Status</th>
                     </tr>
                 </thead>
@@ -993,6 +996,17 @@ class ReportExporter:
             else:
                 status = '-'
             
+            # Placement Score (Allocation)
+            placement_score = getattr(result, 'placement_score', 'Unknown')
+            if placement_score == 'High':
+                allocation_html = '<span class="status-ready">🟢 High</span>'
+            elif placement_score == 'Medium':
+                allocation_html = '<span style="color: #d97706;">🟡 Medium</span>'
+            elif placement_score == 'Low':
+                allocation_html = '<span style="color: #dc2626;">🔴 Low</span>'
+            else:
+                allocation_html = '-'
+            
             # Savings
             savings_val = result.total_potential_savings if result.total_potential_savings else 0
             savings_html = f'<span class="savings-cell">${savings_val:,.0f}/mo</span>' if savings_val > 0 else '-'
@@ -1025,10 +1039,11 @@ class ReportExporter:
                         <td>{type_html}</td>
                         <td data-value="{savings_val}">{savings_html}</td>
                         <td><span class="priority-badge priority-{priority_class}">{result.priority}</span></td>
+                        <td>{allocation_html}</td>
                         <td>{status}</td>
                     </tr>
                     <tr class="detail-row" id="detail-{row_id}">
-                        <td colspan="8">
+                        <td colspan="9">
                             <div class="detail-content">
                                 <div class="detail-grid">
                                     <div class="detail-section">
@@ -1065,6 +1080,10 @@ class ReportExporter:
                                         <div class="metric-row">
                                             <span class="metric-label">Feasible:</span>
                                             <span class="metric-value">{'Yes' if result.deployment_feasible else 'No'}</span>
+                                        </div>
+                                        <div class="metric-row">
+                                            <span class="metric-label">Allocation Score:</span>
+                                            <span class="metric-value">{allocation_html}</span>
                                         </div>
                                         <div class="metric-row">
                                             <span class="metric-label">Constraints:</span>
@@ -1326,6 +1345,8 @@ class ReportExporter:
             "current_monthly_cost": vm.current_price_monthly,
             "recommendation_type": result.recommendation_type,
             "priority": result.priority,
+            "placement_score": getattr(result, 'placement_score', 'Unknown'),
+            "placement_score_warning": getattr(result, 'placement_score_warning', False),
             "potential_monthly_savings": result.total_potential_savings,
             "potential_annual_savings": result.total_potential_savings * 12,
             "current_generation": result.current_generation,

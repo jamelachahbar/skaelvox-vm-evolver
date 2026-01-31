@@ -30,6 +30,13 @@ try:
 except ImportError:
     CONSTRAINT_VALIDATION_AVAILABLE = False
 
+# Import placement score client (optional, graceful fallback)
+try:
+    from azure_client import PlacementScoreClient
+    PLACEMENT_SCORE_AVAILABLE = True
+except ImportError:
+    PLACEMENT_SCORE_AVAILABLE = False
+
 
 console = Console()
 
@@ -58,6 +65,11 @@ class RightsizingResult:
     validated_alternatives: List[Dict[str, Any]] = field(default_factory=list)  # SKUs that passed validation
     constraint_issues: List[str] = field(default_factory=list)  # Issues found during validation
     quota_warnings: List[str] = field(default_factory=list)  # Quota-related warnings
+    
+    # Placement Score (High, Medium, Low, Unknown) - for recommended SKU
+    # Uses Azure's universal Placement Score API to assess deployment success probability
+    placement_score: str = "Unknown"
+    placement_score_warning: bool = False  # True if score is Low (high risk of deployment failure)
     
     # Summary
     total_potential_savings: float = 0.0
@@ -105,6 +117,7 @@ class AnalysisEngine:
         ai_analyzer: Optional[AIAnalyzer] = None,
         settings: Optional[Settings] = None,
         validate_constraints: bool = True,
+        check_placement_scores: bool = False,
         max_workers: int = DEFAULT_MAX_WORKERS,
     ):
         self.azure_client = azure_client
@@ -112,6 +125,7 @@ class AnalysisEngine:
         self.ai_analyzer = ai_analyzer
         self.settings = settings or Settings()
         self.validate_constraints = validate_constraints
+        self.check_placement_scores = check_placement_scores
         self.max_workers = max_workers
         
         # Thread-safe caches
@@ -128,6 +142,15 @@ class AnalysisEngine:
         if validate_constraints and CONSTRAINT_VALIDATION_AVAILABLE:
             self.constraint_validator = ConstraintValidator(azure_client)
             console.print("[green]✓ Constraint validation enabled[/green]")
+        
+        # Initialize placement score client if available and enabled
+        self.placement_score_client = None
+        if check_placement_scores and PLACEMENT_SCORE_AVAILABLE:
+            self.placement_score_client = PlacementScoreClient(
+                subscription_id=azure_client.subscription_id,
+                credential=azure_client.credential,
+            )
+            console.print("[green]✓ Placement score checking enabled[/green]")
         
         console.print(f"[green]✓ Concurrent analysis enabled (max {max_workers} workers)[/green]")
     
@@ -744,6 +767,32 @@ class AnalysisEngine:
         if result.ranked_alternatives:
             top_choice = result.ranked_alternatives[0]
             result.deployment_feasible = top_choice.get("is_valid", True)
+        
+        # Query placement scores for top recommendations if enabled
+        if self.placement_score_client and result.ranked_alternatives:
+            try:
+                # Get placement scores for top 3 candidates
+                top_skus = [c["sku"] for c in result.ranked_alternatives[:3]]
+                placement_scores = self.placement_score_client.get_placement_scores(
+                    location=vm.location,
+                    sku_names=top_skus,
+                    desired_count=1,
+                    availability_zones=False,  # Regional score is faster
+                )
+                
+                # Map scores to candidates
+                score_map = {ps.sku: ps.score for ps in placement_scores}
+                for candidate in result.ranked_alternatives[:3]:
+                    candidate["placement_score"] = score_map.get(candidate["sku"], "Unknown")
+                
+                # Set the result's placement score from top choice
+                if result.ranked_alternatives:
+                    result.placement_score = result.ranked_alternatives[0].get("placement_score", "Unknown")
+                    result.placement_score_warning = result.placement_score == "Low"
+                    
+            except Exception as e:
+                # Gracefully handle placement score failures
+                pass
     
     def _calculate_sku_score(
         self,

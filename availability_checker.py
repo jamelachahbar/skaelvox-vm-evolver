@@ -182,7 +182,8 @@ class SKUAvailabilityResult:
     # Alternative suggestions if constrained
     alternative_skus: List[AlternativeSKU] = field(default_factory=list)
     
-    # Spot Placement Score (High, Medium, Low, or Unknown)
+    # Placement Score (High, Medium, Low, or Unknown)
+    # Uses Azure's universal Spot Placement Score API (works for ALL VMs, not just Spot!)
     placement_score: str = "Unknown"
     zone_placement_scores: Dict[str, str] = field(default_factory=dict)  # zone -> score
     
@@ -352,7 +353,9 @@ class SKUAvailabilityChecker:
         Args:
             subscription_id: Azure subscription ID (auto-detected if None)
             credential: Azure credential (uses DefaultAzureCredential if None)
-            check_placement_scores: Whether to check Spot Placement Scores (default: False)
+            check_placement_scores: Whether to check Placement Scores (default: False)
+                Note: Uses Azure's Spot Placement Score API which is UNIVERSAL
+                and works for ALL VMs (not just Spot!)
         """
         if not AZURE_SDK_AVAILABLE:
             raise ImportError("Azure SDK packages required. Install with: pip install azure-identity azure-mgmt-compute")
@@ -412,11 +415,11 @@ class SKUAvailabilityChecker:
     
     @property
     def placement_score_client(self):
-        """Lazy-initialize placement score client."""
+        """Lazy-initialize placement score client (uses universal Spot Placement Score API)."""
         if self._placement_score_client is None and self.check_placement_scores:
             # Import here to avoid circular dependency
-            from azure_client import SpotPlacementScoreClient
-            self._placement_score_client = SpotPlacementScoreClient(
+            from azure_client import PlacementScoreClient
+            self._placement_score_client = PlacementScoreClient(
                 self.subscription_id,
                 self.credential,
             )
@@ -556,7 +559,7 @@ class SKUAvailabilityChecker:
                                             result.zone_details[zone_name].is_available = False
                         break
         
-        # Check Spot Placement Scores if enabled
+        # Check Placement Scores if enabled (Spot or Regular)
         if self.check_placement_scores and self.placement_score_client:
             try:
                 placement_scores = self.placement_score_client.get_placement_scores(
@@ -835,9 +838,10 @@ def display_availability_result(
             console.print(zone_table)
     
     # Regional Placement Score (if not zonal)
+    # Note: Despite the name, Spot Placement Score API is universal and works for ALL VMs!
     if result.placement_score != "Unknown" and not result.zone_placement_scores:
         score_color = _get_placement_score_color(result.placement_score)
-        console.print(f"\n[bold]🎯 Spot Placement Score:[/bold] [{score_color}]{result.placement_score}[/{score_color}]")
+        console.print(f"\n[bold]🎯 Placement Score:[/bold] [{score_color}]{result.placement_score}[/{score_color}]")
     
     # Specifications
     if show_specs and result.specifications:

@@ -779,7 +779,7 @@ class PricingClient:
 
 @dataclass
 class PlacementScore:
-    """Represents an Azure Spot Placement Score result."""
+    """Represents an Azure Placement Score result (Universal - works for ALL VMs, not just Spot!)."""
     sku: str
     location: str
     zone: Optional[str] = None
@@ -787,10 +787,16 @@ class PlacementScore:
     is_zonal: bool = False
 
 
-class SpotPlacementScoreClient:
-    """Client for Azure Spot Placement Score API."""
+class PlacementScoreClient:
+    """
+    Client for Azure Placement Score API.
     
-    API_VERSION = "2025-06-05"
+    Note: Despite using the "spot" endpoint, this API is UNIVERSAL and works for ALL VMs,
+    not just Spot VMs! It provides allocation success probability for any VM deployment.
+    See: https://learn.microsoft.com/en-us/azure/virtual-machine-scale-sets/spot-placement-score
+    """
+    
+    API_VERSION = "2024-06-01-preview"  # Use preview API as per Microsoft docs
     
     def __init__(
         self,
@@ -798,7 +804,7 @@ class SpotPlacementScoreClient:
         credential: Optional[Any] = None,
     ):
         """
-        Initialize the Spot Placement Score client.
+        Initialize the Placement Score client.
         
         Args:
             subscription_id: Azure subscription ID
@@ -824,17 +830,21 @@ class SpotPlacementScoreClient:
         availability_zones: bool = True,
     ) -> List[PlacementScore]:
         """
-        Get Spot Placement Scores for VM SKUs in a location.
+        Get Placement Scores for VM SKUs in a location.
+        
+        Note: Despite being called "Spot Placement Score", this API is UNIVERSAL
+        and provides allocation success probability for ANY VM deployment (Spot or Regular).
         
         Args:
             location: Azure region (e.g., "eastus", "westeurope")
-            sku_names: List of VM SKU names (e.g., ["Standard_D4s_v5"])
+            sku_names: List of VM SKU names (e.g., ["Standard_D4s_v5"]) - up to 5
             desired_count: Number of VMs to deploy (default: 1)
             availability_zones: Whether to check zone-level scores (default: True)
             
         Returns:
-            List of PlacementScore objects with deployment probability
+            List of PlacementScore objects with deployment probability (High/Medium/Low)
         """
+        # Use the spot endpoint - it's universal for all VM types!
         url = (
             f"https://management.azure.com/subscriptions/{self.subscription_id}"
             f"/providers/Microsoft.Compute/locations/{location}"
@@ -925,3 +935,7 @@ class SpotPlacementScoreClient:
         """Close the HTTP client on context exit."""
         self.close()
         return False
+
+
+# Backward compatibility alias
+SpotPlacementScoreClient = PlacementScoreClient

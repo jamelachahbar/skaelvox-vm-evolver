@@ -46,7 +46,8 @@ class Settings(BaseSettings):
     skaelvox_leap: int = Field(default=2, alias="SKAELVOX_LEAP")  # How many generations to leap forward (1-3)
     skaelvox_fallback: bool = Field(default=True, alias="SKAELVOX_FALLBACK")  # Fall back if ideal not available
     
-    # Azure Spot Placement Score API
+    # Azure Placement Score API (Universal - works for ALL VMs, not just Spot!)
+    # Uses the Spot Placement Score API which provides allocation success probability for any VM deployment
     check_placement_scores: bool = Field(default=False, alias="CHECK_PLACEMENT_SCORES")  # Check allocation probability
     
     class Config:
