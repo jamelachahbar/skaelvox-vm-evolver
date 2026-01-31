@@ -46,6 +46,9 @@ class Settings(BaseSettings):
     skaelvox_leap: int = Field(default=2, alias="SKAELVOX_LEAP")  # How many generations to leap forward (1-3)
     skaelvox_fallback: bool = Field(default=True, alias="SKAELVOX_FALLBACK")  # Fall back if ideal not available
     
+    # Azure Spot Placement Score API
+    check_placement_scores: bool = Field(default=False, alias="CHECK_PLACEMENT_SCORES")  # Check allocation probability
+    
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

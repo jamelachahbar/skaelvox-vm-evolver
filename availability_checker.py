@@ -182,6 +182,10 @@ class SKUAvailabilityResult:
     # Alternative suggestions if constrained
     alternative_skus: List[AlternativeSKU] = field(default_factory=list)
     
+    # Spot Placement Score (High, Medium, Low, or Unknown)
+    placement_score: str = "Unknown"
+    zone_placement_scores: Dict[str, str] = field(default_factory=dict)  # zone -> score
+    
     # Metadata
     subscription_id: str = ""
     subscription_name: str = ""
@@ -197,6 +201,7 @@ class SKUAvailabilityResult:
             'available_zones': self.available_zones,
             'zone_count': len(self.available_zones),
             'alternative_count': len(self.alternative_skus),
+            'placement_score': self.placement_score,
             'subscription_id': self.subscription_id,
             'subscription_name': self.subscription_name,
             'checked_at': self.checked_at.isoformat(),
@@ -339,6 +344,7 @@ class SKUAvailabilityChecker:
         self,
         subscription_id: Optional[str] = None,
         credential: Any = None,
+        check_placement_scores: bool = False,
     ):
         """
         Initialize the availability checker.
@@ -346,17 +352,20 @@ class SKUAvailabilityChecker:
         Args:
             subscription_id: Azure subscription ID (auto-detected if None)
             credential: Azure credential (uses DefaultAzureCredential if None)
+            check_placement_scores: Whether to check Spot Placement Scores (default: False)
         """
         if not AZURE_SDK_AVAILABLE:
             raise ImportError("Azure SDK packages required. Install with: pip install azure-identity azure-mgmt-compute")
         
         self.credential = credential or DefaultAzureCredential()
         self.subscription_id = subscription_id or self._auto_detect_subscription()
+        self.check_placement_scores = check_placement_scores
         
         self._compute_client = None
         self._subscription_client = None
         self._subscription_name: Optional[str] = None
         self._sku_cache: Dict[str, List[Any]] = {}
+        self._placement_score_client = None
     
     def _auto_detect_subscription(self) -> str:
         """Auto-detect subscription ID from CLI or SDK."""
@@ -400,6 +409,18 @@ class SKUAvailabilityChecker:
                 self.subscription_id,
             )
         return self._compute_client
+    
+    @property
+    def placement_score_client(self):
+        """Lazy-initialize placement score client."""
+        if self._placement_score_client is None and self.check_placement_scores:
+            # Import here to avoid circular dependency
+            from azure_client import SpotPlacementScoreClient
+            self._placement_score_client = SpotPlacementScoreClient(
+                self.subscription_id,
+                self.credential,
+            )
+        return self._placement_score_client
     
     @property
     def subscription_name(self) -> str:
@@ -534,6 +555,28 @@ class SKUAvailabilityChecker:
                                         if status != 'Available':
                                             result.zone_details[zone_name].is_available = False
                         break
+        
+        # Check Spot Placement Scores if enabled
+        if self.check_placement_scores and self.placement_score_client:
+            try:
+                placement_scores = self.placement_score_client.get_placement_scores(
+                    location=region,
+                    sku_names=[sku_name],
+                    desired_count=1,
+                    availability_zones=check_zones and len(result.available_zones) > 0,
+                )
+                
+                for score in placement_scores:
+                    if score.is_zonal and score.zone:
+                        # Zone-level score
+                        result.zone_placement_scores[score.zone] = score.score
+                    else:
+                        # Regional score
+                        result.placement_score = score.score
+                        
+            except Exception as e:
+                logger.debug(f"Could not get placement scores: {e}")
+                # Continue without placement scores
         
         # Find alternative SKUs if constrained
         if find_alternatives and not result.is_available:
@@ -735,23 +778,46 @@ def display_availability_result(
         zone_table.add_column("Available", justify="center")
         zone_table.add_column("Capacity Status")
         
+        # Add placement score column if we have scores
+        if result.zone_placement_scores:
+            zone_table.add_column("Placement Score", justify="center")
+        
         if result.zone_details:
             for zone, details in sorted(result.zone_details.items()):
                 avail_icon = "✅" if details.is_available else "❌"
                 status_color = "green" if details.capacity_status == "Available" else "yellow"
-                zone_table.add_row(
+                
+                row_data = [
                     zone,
                     avail_icon,
                     f"[{status_color}]{details.capacity_status}[/{status_color}]",
-                )
+                ]
+                
+                # Add placement score if available
+                if result.zone_placement_scores:
+                    score = result.zone_placement_scores.get(zone, "Unknown")
+                    score_color = "green" if score == "High" else "yellow" if score == "Medium" else "red" if score == "Low" else "dim"
+                    row_data.append(f"[{score_color}]{score}[/{score_color}]")
+                
+                zone_table.add_row(*row_data)
         elif result.available_zones:
             for zone in sorted(result.available_zones):
-                zone_table.add_row(zone, "✅", "[green]Available[/green]")
+                row_data = [zone, "✅", "[green]Available[/green]"]
+                if result.zone_placement_scores:
+                    score = result.zone_placement_scores.get(zone, "Unknown")
+                    score_color = "green" if score == "High" else "yellow" if score == "Medium" else "red" if score == "Low" else "dim"
+                    row_data.append(f"[{score_color}]{score}[/{score_color}]")
+                zone_table.add_row(*row_data)
         
         if not result.available_zones and not result.zone_details:
             console.print("  [dim]No zone information available[/dim]")
         else:
             console.print(zone_table)
+    
+    # Regional Placement Score (if not zonal)
+    if result.placement_score != "Unknown" and not result.zone_placement_scores:
+        score_color = "green" if result.placement_score == "High" else "yellow" if result.placement_score == "Medium" else "red" if result.placement_score == "Low" else "dim"
+        console.print(f"\n[bold]🎯 Spot Placement Score:[/bold] [{score_color}]{result.placement_score}[/{score_color}]")
     
     # Specifications
     if show_specs and result.specifications:

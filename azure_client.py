@@ -775,3 +775,153 @@ class PricingClient:
         """Close the HTTP client on context exit."""
         self.close()
         return False
+
+
+@dataclass
+class PlacementScore:
+    """Represents an Azure Spot Placement Score result."""
+    sku: str
+    location: str
+    zone: Optional[str] = None
+    score: str = "Unknown"  # High, Medium, Low, or Unknown
+    is_zonal: bool = False
+
+
+class SpotPlacementScoreClient:
+    """Client for Azure Spot Placement Score API."""
+    
+    API_VERSION = "2025-06-05"
+    
+    def __init__(
+        self,
+        subscription_id: str,
+        credential: Optional[Any] = None,
+    ):
+        """
+        Initialize the Spot Placement Score client.
+        
+        Args:
+            subscription_id: Azure subscription ID
+            credential: Azure credential (DefaultAzureCredential or similar)
+        """
+        self.subscription_id = subscription_id
+        self.credential = credential or (DefaultAzureCredential() if AZURE_SDK_AVAILABLE else None)
+        self.client = httpx.Client(timeout=30.0)
+        
+    def _get_access_token(self) -> str:
+        """Get Azure access token for ARM API."""
+        if not self.credential:
+            raise ValueError("No credential provided for authentication")
+        token = self.credential.get_token("https://management.azure.com/.default")
+        return token.token
+    
+    @retry_on_transient(max_retries=3, base_delay=1.0)
+    def get_placement_scores(
+        self,
+        location: str,
+        sku_names: List[str],
+        desired_count: int = 1,
+        availability_zones: bool = True,
+    ) -> List[PlacementScore]:
+        """
+        Get Spot Placement Scores for VM SKUs in a location.
+        
+        Args:
+            location: Azure region (e.g., "eastus", "westeurope")
+            sku_names: List of VM SKU names (e.g., ["Standard_D4s_v5"])
+            desired_count: Number of VMs to deploy (default: 1)
+            availability_zones: Whether to check zone-level scores (default: True)
+            
+        Returns:
+            List of PlacementScore objects with deployment probability
+        """
+        url = (
+            f"https://management.azure.com/subscriptions/{self.subscription_id}"
+            f"/providers/Microsoft.Compute/locations/{location}"
+            f"/placementScores/spot/generate"
+            f"?api-version={self.API_VERSION}"
+        )
+        
+        # Build request body
+        body = {
+            "availabilityZones": availability_zones,
+            "desiredCount": desired_count,
+            "desiredLocations": [location],
+            "desiredSizes": [{"sku": sku} for sku in sku_names],
+        }
+        
+        try:
+            # Get access token
+            token = self._get_access_token()
+            
+            # Make API request
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            }
+            
+            response = self.client.post(url, json=body, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+            
+            # Parse response
+            results = []
+            placement_scores = data.get("placementScores", [])
+            
+            for score_data in placement_scores:
+                sku = score_data.get("sku", "")
+                score_location = score_data.get("location", location)
+                is_zonal = score_data.get("isZonal", False)
+                
+                if is_zonal:
+                    # Zone-level scores
+                    zone_scores = score_data.get("zoneScores", [])
+                    for zone_score in zone_scores:
+                        zone = zone_score.get("zone", "")
+                        score = zone_score.get("score", "Unknown")
+                        results.append(PlacementScore(
+                            sku=sku,
+                            location=score_location,
+                            zone=zone,
+                            score=score,
+                            is_zonal=True,
+                        ))
+                else:
+                    # Regional score
+                    score = score_data.get("score", "Unknown")
+                    results.append(PlacementScore(
+                        sku=sku,
+                        location=score_location,
+                        zone=None,
+                        score=score,
+                        is_zonal=False,
+                    ))
+            
+            return results
+            
+        except httpx.HTTPStatusError as e:
+            logger.warning(f"Failed to get placement scores: HTTP {e.response.status_code}")
+            # Return unknown scores on failure
+            return [
+                PlacementScore(sku=sku, location=location, score="Unknown")
+                for sku in sku_names
+            ]
+        except Exception as e:
+            logger.warning(f"Failed to get placement scores: {e}")
+            return [
+                PlacementScore(sku=sku, location=location, score="Unknown")
+                for sku in sku_names
+            ]
+    
+    def close(self):
+        """Close the HTTP client."""
+        self.client.close()
+    
+    def __enter__(self):
+        """Support context manager protocol."""
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Close the HTTP client on context exit."""
+        self.close()
+        return False
