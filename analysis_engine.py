@@ -119,6 +119,9 @@ class AnalysisEngine:
         self._sku_cache_lock = threading.Lock()
         self._price_cache: Dict[str, float] = {}
         self._price_cache_lock = threading.Lock()
+        # Fast in-memory set of valid (non-restricted) SKU names per region
+        self._valid_sku_sets: Dict[str, set] = {}
+        self._valid_sku_sets_lock = threading.Lock()
         
         # Initialize constraint validator if available and enabled
         self.constraint_validator = None
@@ -150,6 +153,22 @@ class AnalysisEngine:
                     self._price_cache[cache_key] = price
             return self._price_cache.get(cache_key)
     
+    def _get_valid_sku_set(self, location: str) -> set:
+        """Get or build the set of valid (non-restricted) SKU names for a region.
+
+        Uses the already-cached SKU list so this is purely an in-memory operation
+        after the initial SKU fetch.
+        """
+        with self._valid_sku_sets_lock:
+            if location not in self._valid_sku_sets:
+                skus = self._get_cached_skus(location)
+                self._valid_sku_sets[location] = {sku.name for sku in skus}
+            return self._valid_sku_sets[location]
+
+    def _is_sku_valid_in_region(self, sku_name: str, location: str) -> bool:
+        """Check if a SKU is available (non-restricted) in a region using in-memory set."""
+        return sku_name in self._get_valid_sku_set(location)
+
     def _prefetch_pricing_data(self, vms: List[VMInfo], progress) -> None:
         """Pre-fetch pricing data for all VMs in parallel."""
         task = progress.add_task("[cyan]Pre-fetching pricing data...", total=len(vms))
@@ -329,6 +348,11 @@ class AnalysisEngine:
         for rec in advisor_recs:
             if rec.vm_name.lower() == vm.name.lower():
                 result.advisor_recommendation = rec
+                # Validate the Advisor-recommended SKU is available in this region
+                if rec.recommended_sku and not self._is_sku_valid_in_region(rec.recommended_sku, vm.location):
+                    result.constraint_issues.append(
+                        f"Advisor-recommended SKU {rec.recommended_sku} is restricted in {vm.location}"
+                    )
                 break
         
         # Analyze generation upgrade potential
@@ -381,10 +405,14 @@ class AnalysisEngine:
         # Check if there's a newer generation available
         for old_pattern, new_sku in VM_GENERATION_MAP.items():
             if current_sku.startswith(old_pattern) or current_sku == old_pattern:
+                # Verify the target SKU is actually available in this region
+                if not self._is_sku_valid_in_region(new_sku, vm.location):
+                    break
+
                 # Found a potential upgrade
                 new_price = self._get_cached_price(new_sku, vm.location, vm.os_type)
                 current_price = vm.current_price_monthly or 0
-                
+
                 if new_price:
                     new_monthly = new_price * 730
                     if new_monthly < current_price:
@@ -675,30 +703,43 @@ class AnalysisEngine:
         # Store all ranked alternatives (top 10)
         result.ranked_alternatives = candidates[:10]
         
-        # Validate only the top recommendation (if constraint validator enabled)
+        # Validate top 3 candidates with full constraint validator (quota + capacity)
+        # then auto-promote the first valid candidate to #1
         if self.constraint_validator and result.ranked_alternatives:
-            top_sku = result.ranked_alternatives[0]["sku"]
-            try:
-                validation = self.constraint_validator.validate_sku(
-                    sku_name=top_sku,
-                    location=vm.location,
-                    required_vcpus=result.ranked_alternatives[0]["vcpus"],
-                    required_features=required_features if required_features else None,
-                )
-                result.ranked_alternatives[0]["is_valid"] = validation.is_valid
-                if not validation.is_valid:
-                    for restriction in validation.restrictions:
-                        result.ranked_alternatives[0]["validation_issues"].append(restriction.message)
-                    result.constraint_issues.extend(result.ranked_alternatives[0]["validation_issues"])
-                if validation.quota_info and validation.quota_info.usage_percent > 80:
-                    warning = f"Quota warning for {top_sku}: {validation.quota_info.usage_percent:.1f}% used"
-                    result.quota_warnings.append(warning)
-            except Exception:
-                pass  # Skip validation on error
-        
+            first_valid_idx = None
+            validate_count = min(3, len(result.ranked_alternatives))
+
+            for idx in range(validate_count):
+                candidate = result.ranked_alternatives[idx]
+                try:
+                    validation = self.constraint_validator.validate_sku(
+                        sku_name=candidate["sku"],
+                        location=vm.location,
+                        required_vcpus=candidate["vcpus"],
+                        required_features=required_features if required_features else None,
+                    )
+                    candidate["is_valid"] = validation.is_valid
+                    if not validation.is_valid:
+                        for restriction in validation.restrictions:
+                            candidate["validation_issues"].append(restriction.message)
+                        result.constraint_issues.extend(candidate["validation_issues"])
+                    else:
+                        if first_valid_idx is None:
+                            first_valid_idx = idx
+                    if validation.quota_info and validation.quota_info.usage_percent > 80:
+                        warning = f"Quota warning for {candidate['sku']}: {validation.quota_info.usage_percent:.1f}% used"
+                        result.quota_warnings.append(warning)
+                except Exception:
+                    pass  # Skip validation on error
+
+            # Auto-promote: if #1 is invalid but a later candidate is valid, swap it up
+            if first_valid_idx is not None and first_valid_idx > 0:
+                promoted = result.ranked_alternatives.pop(first_valid_idx)
+                result.ranked_alternatives.insert(0, promoted)
+
         # Store only validated alternatives
         result.validated_alternatives = [c for c in candidates if c["is_valid"]][:10]
-        
+
         # Check if top recommendation is valid
         if result.ranked_alternatives:
             top_choice = result.ranked_alternatives[0]

@@ -374,33 +374,59 @@ Ranking criteria (weighted):
         complexity_low = sum(1 for r in recommendations if r.migration_complexity == "Low")
         complexity_med = sum(1 for r in recommendations if r.migration_complexity == "Medium")
         complexity_high = sum(1 for r in recommendations if r.migration_complexity == "High")
+        high_conf = sum(1 for r in recommendations if r.confidence == "High")
+        
+        # Find the best quick win
+        quick_wins = [r for r in recommendations if r.migration_complexity == "Low" and r.confidence in ["High", "Medium"]]
+        quick_wins.sort(key=lambda x: x.estimated_monthly_savings, reverse=True)
+        quick_win_text = ""
+        if quick_wins:
+            qw = quick_wins[0]
+            quick_win_text = f"Best quick win: {qw.vm_name} can be rightsized from {qw.current_sku} to {qw.recommended_sku}, saving ${qw.estimated_monthly_savings:.0f}/month with {qw.confidence.lower()} confidence."
 
-        summary_prompt = f"""Generate a concise executive summary for an Azure VM rightsizing analysis:
+        summary_prompt = f"""You are a FinOps analyst writing an executive summary for leadership. Write a clear, professional summary based on this Azure VM optimization analysis.
 
-Total VMs Analyzed: {len(vms)}
-VMs with Recommendations: {len(recommendations)}
-Total Estimated Monthly Savings: ${total_savings:,.2f}
-Total Estimated Annual Savings: ${annual_savings:,.2f}
-
-Recommendations by confidence:
-- High confidence: {sum(1 for r in recommendations if r.confidence == "High")}
+ANALYSIS RESULTS:
+- VMs analyzed: {len(vms)}
+- VMs with optimization opportunities: {len(recommendations)}
+- Potential monthly savings: ${total_savings:,.0f}
+- Potential annual savings: ${annual_savings:,.0f}
+- High confidence recommendations: {high_conf}
 - Medium confidence: {sum(1 for r in recommendations if r.confidence == "Medium")}
 - Low confidence: {sum(1 for r in recommendations if r.confidence == "Low")}
-
-Migration complexity breakdown:
-- Low complexity: {complexity_low}
+- Low complexity (easy wins): {complexity_low}
 - Medium complexity: {complexity_med}
 - High complexity: {complexity_high}
 
-Top savings opportunities:
-{self._format_top_savings(recommendations[:5])}
+TOP OPPORTUNITIES:
+{self._format_top_savings(recommendations[:3])}
 
-Provide a 2-3 paragraph executive summary suitable for presenting to management,
-highlighting key findings, quick wins, annual savings potential, and recommended next steps.
-"""
+{quick_win_text}
+
+WRITE exactly 3 paragraphs:
+
+PARAGRAPH 1 - HEADLINE FINDING: Start with the key finding. Example: "Our analysis of X virtual machines identified $Y in annual savings opportunities..." Include the savings percentage if meaningful.
+
+PARAGRAPH 2 - QUICK WINS & BREAKDOWN: Describe the low-hanging fruit. How many are easy to implement? Mention the best quick win specifically. What's the breakdown between rightsize, shutdown, and upgrade recommendations?
+
+PARAGRAPH 3 - RECOMMENDED ACTIONS: What should the team do next? Be specific about prioritization. Mention if any recommendations need validation with application owners.
+
+RULES:
+- Write flowing prose, NOT bullet points
+- Do NOT use JSON or markdown formatting
+- Do NOT start with "Here is" or "This summary" - start directly with findings
+- Be specific with numbers
+- Keep it under 200 words total
+- Professional tone suitable for a CTO or finance stakeholder"""
         
         try:
-            return self._call_ai(summary_prompt, max_tokens=1000)
+            response = self._call_ai(summary_prompt, max_tokens=600)
+            # Clean up any JSON that might have slipped through
+            if response.strip().startswith('{'):
+                return self._generate_basic_summary(vms, recommendations, total_savings)
+            # Remove any markdown artifacts
+            response = response.replace('**', '').replace('##', '').replace('# ', '')
+            return response.strip()
             
         except Exception:
             return self._generate_basic_summary(vms, recommendations, total_savings)

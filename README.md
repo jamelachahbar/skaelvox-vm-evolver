@@ -1,6 +1,6 @@
 # Skælvox VM Evolver
 
-A CLI tool for Azure VM cost optimization with intelligent rightsizing recommendations. Powered by adaptive generation evolution.
+A powerful CLI tool for Azure VM cost optimization with AI-powered rightsizing recommendations, interactive HTML reports, and adaptive generation evolution.
 
 ![Skælvox VM Evolver](https://img.shields.io/badge/Skælvox-VM%20Evolver-0078D4?style=for-the-badge&logo=microsoft-azure)
 ![Python](https://img.shields.io/badge/Python-3.9+-3776AB?style=for-the-badge&logo=python)
@@ -8,18 +8,15 @@ A CLI tool for Azure VM cost optimization with intelligent rightsizing recommend
 
 
 ```
-    ███████╗██╗  ██╗ █████╗ ███████╗██╗    ██╗   ██╗ ██████╗ ██╗  ██╗
-    ██╔════╝██║ ██╔╝██╔══██╗██╔════╝██║    ██║   ██║██╔═══██╗╚██╗██╔╝
-    ███████╗█████╔╝ ███████║█████╗  ██║    ██║   ██║██║   ██║ ╚███╔╝
-    ╚════██║██╔═██╗ ██╔══██║██╔══╝  ██║    ╚██╗ ██╔╝██║   ██║ ██╔██╗
-    ███████║██║  ██╗██║  ██║███████╗███████╗╚████╔╝ ╚██████╔╝██╔╝ ██╗
-    ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚══════╝ ╚═══╝   ╚═════╝ ╚═╝  ╚═╝
+        "███████╗██╗  ██╗ █████╗ ███████╗██╗    ██╗   ██╗ ██████╗ ██╗  ██╗
+        "██╔════╝██║ ██╔╝██╔══██╗██╔════╝██║    ██║   ██║██╔═══██╗╚██╗██╔╝
+        "███████╗█████╔╝ ███████║█████╗  ██║    ██║   ██║██║   ██║ ╚███╔╝ 
+        "╚════██║██╔═██╗ ██╔══██║██╔══╝  ██║    ╚██╗ ██╔╝██║   ██║ ██╔██╗ 
+        "███████║██║  ██╗██║  ██║███████╗███████╗╚████╔╝ ╚██████╔╝██╔╝ ██╗
+        "╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚══════╝ ╚═══╝   ╚═════╝ ╚═╝  ╚═╝
 ```
 
-![Skelvox start](docs/images/skelvoxstart.png)
-
-
-![SKU Availability Check](docs/images/check-availability.png)
+![alt text](docs/images/image.png)
 
 ## Why "Skælvox"?
 
@@ -49,15 +46,26 @@ Like a chameleon, Skælvox helps your VMs evolve to newer generations while grac
 
 ### AI-Powered Analysis
 
-- **Intelligent Recommendations**: Claude AI analyzes patterns and provides context-aware suggestions
-- **Risk Assessment**: Evaluates migration complexity and potential impacts
-- **Executive Summaries**: AI-generated reports for management presentations
+- **Dual AI Provider Support**: Choose between Azure OpenAI (GPT-4o) or Anthropic Claude
+- **Intelligent Recommendations**: AI analyzes patterns and provides context-aware suggestions
+- **Decision Summaries**: Clear recommendations with alternatives and trade-offs
+- **Workload Detection**: Automatically infers environment types (production, dev, test) from naming patterns
+- **Quick Win Identification**: Highlights low-risk, high-reward optimization opportunities
+- **Executive Summaries**: AI-generated prose reports suitable for CTO/finance stakeholders
 
 ### SKU Ranking & Comparison
 
 - **Multi-factor Scoring**: Price, performance, generation, features
 - **Weighted Rankings**: Customizable ranking criteria
 - **Feature Comparison**: Premium storage, accelerated networking, etc.
+
+### Professional Terminal UI
+
+- **Clean ASCII Art Header**: Gradient-colored SKAELVOX logo
+- **Status Indicators**: Visual feature badges with color-coded icons
+- **Rich Tables**: Formatted output with priority colors and status badges
+- **Progress Bars**: Real-time progress during analysis phases
+- **HydroToDo-Inspired Design**: Minimalist, centered layout with subtle separators
 
 ### Skælvox Mode - Adaptive Generation Evolution
 
@@ -533,7 +541,11 @@ When AI is enabled, the tool provides:
 | `AZURE_TENANT_ID` | Azure AD tenant | Optional* |
 | `AZURE_CLIENT_ID` | Service principal ID | Optional* |
 | `AZURE_CLIENT_SECRET` | Service principal secret | Optional* |
-| `ANTHROPIC_API_KEY` | Claude API key for AI features | Optional |
+| `AI_PROVIDER` | AI provider (`azure_openai` or `anthropic`) | `azure_openai` |
+| `AZURE_OPENAI_ENDPOINT` | Azure OpenAI endpoint URL | Optional |
+| `AZURE_OPENAI_DEPLOYMENT` | Azure OpenAI deployment name | `gpt-4o` |
+| `AZURE_OPENAI_API_VERSION` | Azure OpenAI API version | `2024-02-15-preview` |
+| `ANTHROPIC_API_KEY` | Claude API key (if using Anthropic) | Optional |
 | `LOOKBACK_DAYS` | Metrics analysis period | 30 |
 | `CPU_THRESHOLD_LOW` | Low CPU threshold (%) | 20 |
 | `CPU_THRESHOLD_HIGH` | High CPU threshold (%) | 80 |
@@ -556,13 +568,15 @@ SKU_RANKING_WEIGHTS = {
 ## 📁 Project Structure
 
 ```
-azure-vm-rightsizer/
+skaelvox-vm-evolver/
 ├── main.py                  # CLI entry point (typer + rich)
 ├── config.py                # Configuration & mappings
 ├── azure_client.py          # Azure SDK interactions + SKU constraints
 ├── availability_checker.py  # Zone-aware SKU availability + Log Analytics
-├── ai_analyzer.py           # Claude AI integration
+├── ai_analyzer.py           # AI integration (Azure OpenAI + Anthropic)
 ├── analysis_engine.py       # Core analysis logic
+├── report_exporter.py       # Export to JSON, CSV, HTML with interactive dashboard
+├── constraint_validator.py  # SKU constraint validation
 ├── demo.py                  # Demo without Azure credentials
 ├── requirements.txt         # Python dependencies
 ├── setup.py                 # Package installation
@@ -660,13 +674,19 @@ python main.py analyze -s <sub-id> -o report.html
 ```
 
 **Features:**
-- Beautiful responsive design with embedded CSS
-- Color-coded priority and status indicators
-- Summary cards with key metrics
-- Detailed breakdown tables
-- AI executive summary (if available)
-- No external dependencies - single self-contained file
-- Print-friendly layout
+- **Modern Dashboard Design** - Infracost-inspired professional styling with purple accent theme
+- **Interactive Donut Chart** - Hover for tooltips, click legend to filter table by recommendation type
+- **Sortable Table Columns** - Click headers to sort ascending/descending
+- **Search & Filter** - Real-time search box and priority filter buttons (All/High/Medium/Low)
+- **Expandable Row Details** - Click any row to reveal:
+  - VM performance metrics (CPU, memory utilization)
+  - AI analysis reasoning and decision summary
+  - Alternative SKU options
+  - Deployment feasibility and constraints
+- **Score Cards** - Visual summary with VMs analyzed, recommendations count, priority breakdown
+- **Executive Summary** - AI-generated prose formatted in proper paragraphs
+- **Self-Contained** - Single HTML file with embedded CSS/JS, no external dependencies
+- **Print-Friendly** - Clean layout for PDF export
 
 ### Format Auto-Detection
 The tool automatically detects the format from the file extension:
@@ -918,12 +938,18 @@ jobs:
 - [x] Multi-subscription support (whole tenant scanning)
 - [x] Regional price comparison (50+ Azure regions)
 - [x] Skælvox adaptive generation evolution
+- [x] HTML report generation with interactive dashboard
+- [x] Azure OpenAI integration (GPT-4o support)
+- [x] Professional terminal UI (HydroToDo-inspired design)
+- [x] Interactive donut charts with tooltips
+- [x] Sortable/filterable recommendation tables
+- [x] Expandable row details with AI insights
 - [ ] Reserved Instance recommendations
 - [ ] Spot VM opportunity analysis
 - [ ] Azure Hybrid Benefit optimization
-- [ ] HTML report generation
 - [ ] Slack/Teams notifications
 - [ ] Terraform output for automation
+- [ ] Dark mode HTML reports
 
 ## License
 
@@ -931,4 +957,6 @@ MIT License - see LICENSE file for details.
 
 ---
 
-**Skælvox VM Evolver** — Azure VM cost optimization with adaptive generation evolution.
+**Skælvox VM Evolver** — Azure VM cost optimization with AI-powered insights, interactive dashboards, and adaptive generation evolution.
+
+🦎 *Like a chameleon, Skælvox helps your VMs evolve to newer generations while gracefully adapting when the ideal isn't available.*
