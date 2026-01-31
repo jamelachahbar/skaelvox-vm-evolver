@@ -135,7 +135,7 @@ def create_summary_panel(report: AnalysisReport) -> Panel:
   • Total VMs Discovered: {report.total_vms}
   • VMs Analyzed: {report.analyzed_vms}
   • VMs with Recommendations: {report.vms_with_recommendations}
-  • VMs without Changes Needed: {report.analyzed_vms - report.vms_with_recommendations}
+  • VMs without Changes Needed: {max(0, report.analyzed_vms - report.vms_with_recommendations)}
 
 [bold cyan]💰 Cost Summary[/bold cyan]
   • Current Monthly Cost: {format_currency(report.total_current_cost)}
@@ -378,7 +378,7 @@ def analyze(
         None, "--output", "-o",
         help="Output file path (format auto-detected from extension: .json, .csv, .html)",
     ),
-    format: Optional[str] = typer.Option(
+    output_format: Optional[str] = typer.Option(
         None, "--format", "-f",
         help="Output format override (json, csv, html). Auto-detected from file extension if not specified.",
     ),
@@ -570,18 +570,22 @@ def analyze(
         # Save to file if requested
         if output:
             try:
-                export_path = export_report(report, output, format)
+                export_path = export_report(report, output, output_format)
                 
                 # Determine format for display message
-                detected_format = format or output.split('.')[-1].upper()
+                from pathlib import Path
+                detected_format = output_format or Path(output).suffix.lstrip('.') or 'json'
+                detected_format = detected_format.upper()
+                
                 console.print(f"\n[green]✓ Results exported to {export_path} ({detected_format} format)[/green]")
                 
                 # Show helpful info based on format
-                if detected_format.lower() in ['csv', 'excel']:
+                format_lower = detected_format.lower()
+                if format_lower in ['csv', 'excel']:
                     console.print("[dim]   → Open with Excel or any spreadsheet application[/dim]")
-                elif detected_format.lower() == 'html':
+                elif format_lower == 'html':
                     console.print("[dim]   → Open in web browser for interactive viewing[/dim]")
-                elif detected_format.lower() == 'json':
+                elif format_lower == 'json':
                     console.print("[dim]   → Use with automation tools or custom scripts[/dim]")
             except ValueError as e:
                 console.print(f"[red]✗ Export failed: {e}[/red]")

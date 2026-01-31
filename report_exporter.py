@@ -23,19 +23,19 @@ class ReportExporter:
         """
         self.report = report
     
-    def export(self, output_path: str, format: Optional[str] = None) -> str:
+    def export(self, output_path: str, output_format: Optional[str] = None) -> str:
         """Export report to file, auto-detecting format from extension.
         
         Args:
             output_path: Path to output file
-            format: Optional format override ('json', 'csv', 'html'). 
+            output_format: Optional format override ('json', 'csv', 'html'). 
                    If None, detected from file extension.
         
         Returns:
             Path to the exported file
         """
         # Detect format from extension if not specified
-        if format is None:
+        if output_format is None:
             ext = Path(output_path).suffix.lower()
             format_map = {
                 '.json': 'json',
@@ -43,17 +43,17 @@ class ReportExporter:
                 '.html': 'html',
                 '.htm': 'html'
             }
-            format = format_map.get(ext, 'json')
+            output_format = format_map.get(ext, 'json')
         
         # Export based on format
-        if format == 'json':
+        if output_format == 'json':
             return self.export_json(output_path)
-        elif format == 'csv':
+        elif output_format == 'csv':
             return self.export_csv(output_path)
-        elif format == 'html':
+        elif output_format == 'html':
             return self.export_html(output_path)
         else:
-            raise ValueError(f"Unsupported export format: {format}")
+            raise ValueError(f"Unsupported export format: {output_format}")
     
     def export_json(self, output_path: str) -> str:
         """Export report as JSON.
@@ -651,16 +651,16 @@ class ReportExporter:
                 .replace("'", "&#x27;"))
 
 
-def export_report(report: AnalysisReport, output_path: str, format: Optional[str] = None) -> str:
+def export_report(report: AnalysisReport, output_path: str, output_format: Optional[str] = None) -> str:
     """Convenience function to export a report.
     
     Args:
         report: The AnalysisReport to export
         output_path: Path to output file
-        format: Optional format ('json', 'csv', 'html'). Auto-detected if None.
+        output_format: Optional format ('json', 'csv', 'html'). Auto-detected if None.
     
     Returns:
         Path to the exported file
     """
     exporter = ReportExporter(report)
-    return exporter.export(output_path, format)
+    return exporter.export(output_path, output_format)
