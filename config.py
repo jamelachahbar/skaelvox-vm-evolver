@@ -17,8 +17,14 @@ class Settings(BaseSettings):
     azure_client_secret: Optional[str] = Field(default=None, alias="AZURE_CLIENT_SECRET")
     
     # AI Configuration
+    ai_provider: str = Field(default="anthropic", alias="AI_PROVIDER")  # "anthropic" or "azure_openai"
     anthropic_api_key: Optional[str] = Field(default=None, alias="ANTHROPIC_API_KEY")
     ai_model: str = Field(default="claude-sonnet-4-20250514", alias="AI_MODEL")
+    
+    # Azure OpenAI Configuration
+    azure_openai_endpoint: Optional[str] = Field(default=None, alias="AZURE_OPENAI_ENDPOINT")
+    azure_openai_deployment: Optional[str] = Field(default=None, alias="AZURE_OPENAI_DEPLOYMENT")
+    azure_openai_api_version: str = Field(default="2024-02-15-preview", alias="AZURE_OPENAI_API_VERSION")
     
     # Analysis Settings
     lookback_days: int = Field(default=30, alias="LOOKBACK_DAYS")
@@ -166,7 +172,7 @@ REGION_ALTERNATIVES = {
     "westus2": ["westus", "westus3", "centralus", "southcentralus"],
     "westus3": ["westus2", "westus", "southcentralus"],
     "centralus": ["eastus", "eastus2", "southcentralus", "northcentralus"],
-    "southcentralus": ["centralus", "eastus", "westus2", "southcentralus"],
+    "southcentralus": ["centralus", "eastus", "westus2", "northcentralus"],
     "northcentralus": ["centralus", "eastus", "eastus2"],
     "westcentralus": ["centralus", "westus2", "southcentralus"],
     

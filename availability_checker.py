@@ -11,7 +11,7 @@ Based on the VM SKU Capacity Monitor pattern.
 """
 from typing import Optional, Dict, List, Any, Tuple
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 import logging
 import subprocess
@@ -185,7 +185,7 @@ class SKUAvailabilityResult:
     # Metadata
     subscription_id: str = ""
     subscription_name: str = ""
-    checked_at: datetime = field(default_factory=datetime.utcnow)
+    checked_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for logging."""
@@ -254,7 +254,7 @@ class LogAnalyticsLogger:
         """
         try:
             log_entry = {
-                "TimeGenerated": datetime.utcnow().isoformat(),
+                "TimeGenerated": datetime.now(timezone.utc).isoformat(),
                 "sku_name": result.sku_name,
                 "region": result.region,
                 "subscription_id": result.subscription_id,
@@ -293,7 +293,7 @@ class LogAnalyticsLogger:
         
         for result in results:
             log_entries.append({
-                "TimeGenerated": datetime.utcnow().isoformat(),
+                "TimeGenerated": datetime.now(timezone.utc).isoformat(),
                 "sku_name": result.sku_name,
                 "region": result.region,
                 "subscription_id": result.subscription_id,
@@ -363,8 +363,7 @@ class SKUAvailabilityChecker:
         # Try Azure CLI first
         try:
             result = subprocess.run(
-                "az account show --query 'id' -o tsv",
-                shell=True,
+                ["az", "account", "show", "--query", "id", "-o", "tsv"],
                 check=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
@@ -461,7 +460,7 @@ class SKUAvailabilityChecker:
             is_available=False,
             subscription_id=self.subscription_id,
             subscription_name=self.subscription_name,
-            checked_at=datetime.utcnow(),
+            checked_at=datetime.now(timezone.utc),
         )
         
         # Get all SKUs for the region

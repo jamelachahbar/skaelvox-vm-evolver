@@ -10,7 +10,7 @@ Performance optimizations:
 """
 from typing import List, Dict, Optional, Tuple, Any
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
 import threading
@@ -129,12 +129,15 @@ class AnalysisEngine:
         console.print(f"[green]✓ Concurrent analysis enabled (max {max_workers} workers)[/green]")
     
     def _get_cached_skus(self, location: str) -> List[SKUInfo]:
-        """Get SKUs with thread-safe caching."""
+        """Get SKUs with thread-safe caching. Also populates the AzureClient memory cache."""
         with self._sku_cache_lock:
             if location not in self._sku_cache:
-                self._sku_cache[location] = self.azure_client.get_available_skus(
+                skus = self.azure_client.get_available_skus(
                     location, include_restricted=False
                 )
+                self._sku_cache[location] = skus
+                # Populate the AzureClient's memory cache for dynamic memory resolution
+                self.azure_client.populate_memory_cache(skus)
             return self._sku_cache[location]
     
     def _get_cached_price(self, sku_name: str, location: str, os_type: str) -> Optional[float]:
@@ -190,7 +193,7 @@ class AnalysisEngine:
     ) -> AnalysisReport:
         """Run complete analysis on subscription or resource group with concurrent processing."""
         report = AnalysisReport(
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             subscription_id=self.azure_client.subscription_id,
             total_vms=0,
             analyzed_vms=0,

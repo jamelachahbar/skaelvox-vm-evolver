@@ -4,8 +4,42 @@ Handles authentication and interactions with Azure Resource Manager APIs.
 """
 from typing import Optional, Dict, List, Any
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+import time
+import functools
+import logging
 import httpx
+
+logger = logging.getLogger(__name__)
+
+
+def retry_on_transient(max_retries: int = 3, base_delay: float = 1.0):
+    """Retry decorator with exponential backoff for transient HTTP errors."""
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            last_exception = None
+            for attempt in range(max_retries + 1):
+                try:
+                    return func(*args, **kwargs)
+                except httpx.TimeoutException as e:
+                    last_exception = e
+                except httpx.HTTPStatusError as e:
+                    if e.response.status_code in (429, 500, 502, 503, 504):
+                        last_exception = e
+                    else:
+                        raise
+                except httpx.ConnectError as e:
+                    last_exception = e
+
+                if attempt < max_retries:
+                    delay = base_delay * (2 ** attempt)
+                    logger.debug(f"Retry {attempt + 1}/{max_retries} after {delay}s: {last_exception}")
+                    time.sleep(delay)
+
+            raise last_exception
+        return wrapper
+    return decorator
 
 # Handle optional Azure SDK imports
 try:
@@ -181,7 +215,10 @@ class AzureClient:
         self.resource_client = ResourceManagementClient(
             self.credential, subscription_id
         )
-    
+
+        # Dynamic memory cache (populated from SKU API data)
+        self._sku_memory_cache: Dict[str, float] = {}
+
     def list_vms(self, resource_group: Optional[str] = None) -> List[VMInfo]:
         """List all VMs in the subscription or resource group."""
         vms = []
@@ -244,7 +281,7 @@ class AzureClient:
         lookback_days: int = 30,
     ) -> VMInfo:
         """Get performance metrics for a VM."""
-        end_time = datetime.utcnow()
+        end_time = datetime.now(timezone.utc)
         start_time = end_time - timedelta(days=lookback_days)
         timespan = f"{start_time.isoformat()}Z/{end_time.isoformat()}Z"
         
@@ -258,6 +295,9 @@ class AzureClient:
             ("Network Out Total", "avg_network_out", None),
         ]
         
+        # Track min available memory separately for correct max usage calculation
+        _min_available_memory = None
+
         for metric_name, avg_attr, max_attr in metrics_to_fetch:
             try:
                 metrics = self.monitor_client.metrics.list(
@@ -267,27 +307,32 @@ class AzureClient:
                     metricnames=metric_name,
                     aggregation="Average,Maximum",
                 )
-                
+
                 for metric in metrics.value:
                     avg_values = []
                     max_values = []
-                    
+
                     for ts in metric.timeseries:
                         for data in ts.data:
                             if data.average is not None:
                                 avg_values.append(data.average)
                             if data.maximum is not None:
                                 max_values.append(data.maximum)
-                    
+
                     if avg_values:
                         setattr(vm, avg_attr, sum(avg_values) / len(avg_values))
                     if max_attr and max_values:
                         setattr(vm, max_attr, max(max_values))
-                        
+
+                    # For "Available Memory Bytes", track min available
+                    # (min available = max memory usage)
+                    if metric_name == "Available Memory Bytes" and avg_values:
+                        _min_available_memory = min(avg_values)
+
             except Exception as e:
                 # Metrics might not be available for all VMs
                 pass
-        
+
         # Convert memory from bytes to percentage
         # Azure reports "Available Memory Bytes" - we convert to "Used Memory %"
         if vm.avg_memory is not None:
@@ -296,12 +341,13 @@ class AzureClient:
             if total_memory_bytes and total_memory_bytes > 0:
                 # Calculate used memory percentage: (total - available) / total * 100
                 avg_available = vm.avg_memory
-                max_available = vm.max_memory if vm.max_memory else avg_available
-                
+                # Min available memory = when most memory was in use = max usage
+                min_available = _min_available_memory if _min_available_memory is not None else avg_available
+
                 vm.avg_memory = ((total_memory_bytes - avg_available) / total_memory_bytes) * 100
                 # For max memory usage, use min available (when most memory was in use)
-                vm.max_memory = ((total_memory_bytes - max_available) / total_memory_bytes) * 100
-                
+                vm.max_memory = ((total_memory_bytes - min_available) / total_memory_bytes) * 100
+
                 # Clamp to valid range
                 vm.avg_memory = max(0, min(100, vm.avg_memory))
                 vm.max_memory = max(0, min(100, vm.max_memory))
@@ -312,9 +358,27 @@ class AzureClient:
         
         return vm
     
+    def populate_memory_cache(self, skus: List['SKUInfo']) -> None:
+        """Populate the memory cache from fetched SKU data.
+
+        Call this with SKU data from get_available_skus() to enable dynamic
+        memory resolution for any SKU, not just the hardcoded ones.
+        """
+        for sku in skus:
+            if sku.name and sku.memory_gb > 0:
+                self._sku_memory_cache[sku.name] = sku.memory_gb
+
     def _get_vm_total_memory_bytes(self, vm_size: str) -> Optional[float]:
-        """Get total memory in bytes for a VM SKU."""
-        # Common SKU memory mappings (in GB)
+        """Get total memory in bytes for a VM SKU.
+
+        Checks the dynamic SKU cache first (populated from Azure API),
+        then falls back to hardcoded mappings for offline/cached scenarios.
+        """
+        # First: check dynamic SKU cache (populated from Azure API)
+        if hasattr(self, '_sku_memory_cache') and vm_size in self._sku_memory_cache:
+            return self._sku_memory_cache[vm_size] * 1024 * 1024 * 1024
+
+        # Fallback: Common SKU memory mappings (in GB)
         sku_memory_gb = {
             # B-series (burstable)
             "Standard_B1s": 1, "Standard_B1ms": 2, "Standard_B2s": 4, "Standard_B2ms": 8,
@@ -338,18 +402,18 @@ class AzureClient:
             "Standard_F2s_v2": 4, "Standard_F4s_v2": 8, "Standard_F8s_v2": 16,
             "Standard_F16s_v2": 32, "Standard_F32s_v2": 64,
         }
-        
+
         # Look up directly
         if vm_size in sku_memory_gb:
             return sku_memory_gb[vm_size] * 1024 * 1024 * 1024
-        
+
         # Try pattern matching for similar SKUs
         for sku, memory_gb in sku_memory_gb.items():
             # Match base name (e.g., D8s matches D8s_v3, D8s_v4, D8s_v5)
             base_sku = sku.rsplit('_', 1)[0]  # Remove version suffix
             if vm_size.startswith(base_sku):
                 return memory_gb * 1024 * 1024 * 1024
-        
+
         return None
     
     def get_advisor_recommendations(
@@ -367,12 +431,12 @@ class AzureClient:
             
             for rec in advisor_recs:
                 # Filter for VM-related recommendations
-                if rec.impacted_field and "virtualMachines" in rec.impacted_field.lower():
+                if rec.impacted_field and "virtualmachines" in rec.impacted_field.lower():
                     # Parse resource info
                     resource_id = rec.resource_metadata.resource_id if rec.resource_metadata else ""
                     parts = resource_id.split("/") if resource_id else []
                     
-                    vm_name = parts[-1] if len(parts) > 0 else "Unknown"
+                    vm_name = parts[-1] if len(parts) > 1 else "Unknown"
                     resource_group = parts[4] if len(parts) > 4 else "Unknown"
                     
                     # Extract SKU recommendations from extended properties
@@ -380,19 +444,25 @@ class AzureClient:
                     recommended_sku = None
                     savings = None
                     savings_percent = None
-                    
+
                     if rec.extended_properties:
                         current_sku = rec.extended_properties.get("currentSku")
                         recommended_sku = rec.extended_properties.get("targetSku")
                         savings = rec.extended_properties.get("savingsAmount")
-                        savings_percent = rec.extended_properties.get("annualSavingsAmount")
-                        
+                        savings_percent = rec.extended_properties.get("savingsPercentage")
+
                         if savings:
                             try:
                                 savings = float(savings)
                             except (ValueError, TypeError):
                                 savings = None
-                    
+
+                        if savings_percent:
+                            try:
+                                savings_percent = float(savings_percent)
+                            except (ValueError, TypeError):
+                                savings_percent = None
+
                     recommendations.append(AdvisorRecommendation(
                         recommendation_id=rec.id or "",
                         vm_name=vm_name,
@@ -638,33 +708,50 @@ class PricingClient:
                 f"priceType eq 'Consumption' and "
                 f"contains(productName, '{os_type}')"
             )
-            
+
             try:
-                response = self.client.get(
-                    self.BASE_URL,
-                    params={"$filter": filter_query}
-                )
-                response.raise_for_status()
-                data = response.json()
-                
+                items = self._fetch_pricing_items(filter_query)
+
                 # Get the regular (non-Spot, non-Low Priority) price
-                for item in data.get("Items", []):
+                for item in items:
                     sku_name_item = item.get("skuName", "")
                     # Skip Spot and Low Priority
                     if "Spot" in sku_name_item or "Low Priority" in sku_name_item:
                         continue
-                    
+
                     price = item.get("retailPrice", 0)
                     if price > 0:
                         prices[arm_region] = price
                         self._price_cache[cache_key][arm_region] = price
                         break  # Got the regular price, stop
-                            
+
             except Exception as e:
                 # Price not available for this region
                 pass
-        
+
         return prices
+
+    @retry_on_transient(max_retries=3, base_delay=1.0)
+    def _fetch_page(self, url: str, params: Optional[dict] = None) -> dict:
+        """Fetch a single page from the pricing API with retry logic."""
+        response = self.client.get(url, params=params)
+        response.raise_for_status()
+        return response.json()
+
+    def _fetch_pricing_items(self, filter_query: str) -> List[dict]:
+        """Fetch all pricing items, handling pagination via NextPageLink."""
+        all_items = []
+        data = self._fetch_page(self.BASE_URL, params={"$filter": filter_query})
+        all_items.extend(data.get("Items", []))
+
+        # Follow NextPageLink for paginated results
+        next_page = data.get("NextPageLink")
+        while next_page:
+            data = self._fetch_page(next_page)
+            all_items.extend(data.get("Items", []))
+            next_page = data.get("NextPageLink")
+
+        return all_items
     
     def get_price(
         self,
@@ -679,3 +766,12 @@ class PricingClient:
     def close(self):
         """Close the HTTP client."""
         self.client.close()
+
+    def __enter__(self):
+        """Support context manager protocol."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Close the HTTP client on context exit."""
+        self.close()
+        return False

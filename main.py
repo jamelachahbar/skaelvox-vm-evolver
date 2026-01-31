@@ -232,7 +232,7 @@ def create_detailed_result_panel(result: RightsizingResult) -> Panel:
     sections.append(vm_info)
     
     # Performance Metrics
-    if any([vm.avg_cpu, vm.avg_memory]):
+    if vm.avg_cpu is not None or vm.avg_memory is not None:
         metrics = f"""[bold cyan]Performance Metrics (30-day avg)[/bold cyan]
   • Avg CPU: {format_percent(vm.avg_cpu) if vm.avg_cpu else 'N/A'}
   • Max CPU: {format_percent(vm.max_cpu) if vm.max_cpu else 'N/A'}
@@ -256,18 +256,23 @@ def create_detailed_result_panel(result: RightsizingResult) -> Panel:
     if result.ai_recommendation:
         ai_rec = result.ai_recommendation
         confidence_color = get_confidence_color(ai_rec.confidence)
+        actions_text = ""
+        if ai_rec.recommended_actions:
+            actions_lines = "\n".join(f"    • {a}" for a in ai_rec.recommended_actions)
+            actions_text = f"\n  [bold]Recommended Actions:[/bold]\n{actions_lines}\n"
+
         ai = f"""[bold cyan]🤖 AI-Powered Recommendation[/bold cyan]
   • Recommended SKU: [green]{ai_rec.recommended_sku}[/green]
   • Confidence: [{confidence_color}]{ai_rec.confidence}[/{confidence_color}]
   • Est. Monthly Savings: [green]{format_currency(ai_rec.estimated_monthly_savings)}[/green]
   • Migration Complexity: {ai_rec.migration_complexity}
-  
+
   [bold]Reasoning:[/bold]
-  {ai_rec.reasoning[:300]}{'...' if len(ai_rec.reasoning) > 300 else ''}
-  
+  {ai_rec.reasoning}
+
   [bold]Risk Assessment:[/bold]
-  {ai_rec.risk_assessment[:200]}{'...' if len(ai_rec.risk_assessment) > 200 else ''}
-"""
+  {ai_rec.risk_assessment}
+{actions_text}"""
         sections.append(ai)
     
     # Generation Upgrade
@@ -459,17 +464,30 @@ def analyze(
         
         # Initialize AI analyzer if enabled
         ai_analyzer = None
-        if not no_ai and settings.anthropic_api_key:
-            ai_analyzer = AIAnalyzer(
-                api_key=settings.anthropic_api_key,
-                model=settings.ai_model,
-            )
-            if ai_analyzer.is_available():
-                console.print("[green]✓ AI analysis enabled[/green]")
+        if not no_ai:
+            # Check which AI provider to use
+            if settings.ai_provider == "azure_openai" and settings.azure_openai_endpoint:
+                ai_analyzer = AIAnalyzer(
+                    provider="azure_openai",
+                    azure_endpoint=settings.azure_openai_endpoint,
+                    azure_deployment=settings.azure_openai_deployment,
+                    azure_api_version=settings.azure_openai_api_version,
+                )
+            elif settings.anthropic_api_key:
+                ai_analyzer = AIAnalyzer(
+                    api_key=settings.anthropic_api_key,
+                    model=settings.ai_model,
+                    provider="anthropic",
+                )
+            
+            if ai_analyzer and ai_analyzer.is_available():
+                provider_name = "Azure OpenAI" if settings.ai_provider == "azure_openai" else "Anthropic"
+                console.print(f"[green]✓ AI analysis enabled ({provider_name})[/green]")
+            elif ai_analyzer:
+                console.print("[yellow]⚠ AI analysis not available (check credentials)[/yellow]")
+                ai_analyzer = None
             else:
-                console.print("[yellow]⚠ AI analysis not available (check API key)[/yellow]")
-        elif not no_ai:
-            console.print("[yellow]⚠ AI analysis disabled (set ANTHROPIC_API_KEY to enable)[/yellow]")
+                console.print("[yellow]⚠ AI analysis disabled (configure AI_PROVIDER and credentials)[/yellow]")
         
         # 🦎✨ Skælvox Mode status
         if settings.skaelvox_enabled:
@@ -1774,18 +1792,18 @@ def get_first_subscription_id() -> str:
 
 
 def interactive_menu():
-    """Show an interactive menu for the CLI."""
+    """Show an interactive menu for the CLI using a loop (no recursion)."""
     import questionary
     from questionary import Style
-    
+
     create_header()
-    
+
     # First, handle Azure login
     if not _interactive_state.get("logged_in"):
         if not azure_login_flow():
             console.print("\n[yellow]Continuing without Azure login...[/yellow]")
             console.print("[dim]Some features may require manual subscription input.[/dim]\n")
-    
+
     # Menu options - (key, display_name, command, description)
     menu_items = [
         ("1", "🔍 Analyze VMs", "analyze", "Full VM analysis with rightsizing recommendations"),
@@ -1802,16 +1820,7 @@ def interactive_menu():
         ("C", "🔄 Change Subscription", "change-sub", "Select different subscription(s)"),
         ("0", "❌ Exit", "exit", "Exit the CLI"),
     ]
-    
-    # Show current subscription info
-    if _interactive_state.get("selected_subscriptions"):
-        subs = _interactive_state["selected_subscriptions"]
-        if len(subs) == 1:
-            console.print(f"[dim]📍 Active: {subs[0]['name']}[/dim]")
-        else:
-            console.print(f"[dim]📍 Active: {len(subs)} subscriptions selected[/dim]")
-        console.print()
-    
+
     # Subtle inverse bar style (less harsh than bright cyan)
     custom_style = Style([
         ('qmark', 'fg:#888888'),
@@ -1821,72 +1830,85 @@ def interactive_menu():
         ('highlighted', 'bg:#444444 fg:#ffffff'),
         ('selected', 'fg:#88cc88'),
     ])
-    
+
     # Build choices for questionary
     choices = [f"{item[1]} - {item[3]}" for item in menu_items]
-    
-    console.print("[dim]Use ↑↓ arrows to navigate, Enter to select[/dim]\n")
-    
-    # Get user choice using keyboard navigation
-    answer = questionary.select(
-        "🦎 Choose your evolution:",
-        choices=choices,
-        style=custom_style,
-        qmark="",
-        pointer="▶",
-    ).ask()
-    
-    if answer is None:
-        # User pressed Ctrl+C
-        console.print("\n[bold magenta]🦎 The Skælvox rests... Goodbye! ✨[/bold magenta]\n")
-        raise typer.Exit(0)
-    
-    # Find selected item by matching the display string
-    selected_idx = choices.index(answer)
-    selected = menu_items[selected_idx]
-    
-    if selected[0] == "0":
-        console.print("\n[bold magenta]🦎 The Skælvox rests... Goodbye! ✨[/bold magenta]\n")
-        raise typer.Exit(0)
-    
-    if selected[2] == "change-sub":
-        # Change subscription
-        if _interactive_state.get("subscriptions"):
-            select_subscriptions(_interactive_state["subscriptions"])
-        else:
-            azure_login_flow()
-        # Return to menu
-        interactive_menu()
-        return
-    
-    command = selected[2]
-    console.print(f"\n[bold green]🦎 Evolving to: {selected[1]}[/bold green]\n")
-    
-    # Gather parameters based on command
-    if command == "analyze":
-        run_interactive_analyze()
-    elif command == "compare-regions":
-        run_interactive_compare_regions()
-    elif command == "rank-skus":
-        run_interactive_rank_skus()
-    elif command == "show-generations":
-        # No parameters needed
-        sys.argv = ["main.py", "show-generations"]
-        app()
-    elif command == "show-constraints":
-        run_interactive_show_constraints()
-    elif command == "check-quota":
-        run_interactive_check_quota()
-    elif command == "validate-sku":
-        run_interactive_validate_sku()
-    elif command == "check-capacity":
-        run_interactive_check_capacity()
-    elif command == "check-availability":
-        run_interactive_check_availability()
-    elif command == "check-availability-multi":
-        run_interactive_check_availability_multi()
-    elif command == "find-alternatives":
-        run_interactive_find_alternatives()
+
+    while True:
+        # Show current subscription info
+        if _interactive_state.get("selected_subscriptions"):
+            subs = _interactive_state["selected_subscriptions"]
+            if len(subs) == 1:
+                console.print(f"[dim]📍 Active: {subs[0]['name']}[/dim]")
+            else:
+                console.print(f"[dim]📍 Active: {len(subs)} subscriptions selected[/dim]")
+            console.print()
+
+        console.print("[dim]Use ↑↓ arrows to navigate, Enter to select[/dim]\n")
+
+        # Get user choice using keyboard navigation
+        answer = questionary.select(
+            "🦎 Choose your evolution:",
+            choices=choices,
+            style=custom_style,
+            qmark="",
+            pointer="▶",
+        ).ask()
+
+        if answer is None:
+            # User pressed Ctrl+C
+            console.print("\n[bold magenta]🦎 The Skælvox rests... Goodbye! ✨[/bold magenta]\n")
+            raise typer.Exit(0)
+
+        # Find selected item by matching the display string
+        selected_idx = choices.index(answer)
+        selected = menu_items[selected_idx]
+
+        if selected[0] == "0":
+            console.print("\n[bold magenta]🦎 The Skælvox rests... Goodbye! ✨[/bold magenta]\n")
+            raise typer.Exit(0)
+
+        if selected[2] == "change-sub":
+            # Change subscription
+            if _interactive_state.get("subscriptions"):
+                select_subscriptions(_interactive_state["subscriptions"])
+            else:
+                azure_login_flow()
+            continue
+
+        command = selected[2]
+        console.print(f"\n[bold green]🦎 Evolving to: {selected[1]}[/bold green]\n")
+
+        # Gather parameters based on command
+        try:
+            if command == "analyze":
+                run_interactive_analyze()
+            elif command == "compare-regions":
+                run_interactive_compare_regions()
+            elif command == "rank-skus":
+                run_interactive_rank_skus()
+            elif command == "show-generations":
+                # No parameters needed
+                sys.argv = ["main.py", "show-generations"]
+                app()
+            elif command == "show-constraints":
+                run_interactive_show_constraints()
+            elif command == "check-quota":
+                run_interactive_check_quota()
+            elif command == "validate-sku":
+                run_interactive_validate_sku()
+            elif command == "check-capacity":
+                run_interactive_check_capacity()
+            elif command == "check-availability":
+                run_interactive_check_availability()
+            elif command == "check-availability-multi":
+                run_interactive_check_availability_multi()
+            elif command == "find-alternatives":
+                run_interactive_find_alternatives()
+        except SystemExit:
+            pass  # Typer raises SystemExit after commands; continue the menu loop
+
+        console.print()  # Add spacing before next menu iteration
 
 
 def run_interactive_analyze():
@@ -2030,15 +2052,16 @@ def run_interactive_validate_sku():
 def run_interactive_check_capacity():
     """Interactive mode for check-capacity command."""
     console.print(Panel("[bold]🔍 Capacity Check[/bold]", style="cyan"))
-    
-    sku = Prompt.ask("[cyan]SKU Name[/cyan]", default="Standard_D4s_v5")
+
+    vcpus = IntPrompt.ask("[cyan]Minimum vCPUs[/cyan]", default=4)
+    memory = IntPrompt.ask("[cyan]Minimum Memory (GB)[/cyan]", default=8)
     region = Prompt.ask("[cyan]Region[/cyan]", default="westeurope")
     subscription = get_first_subscription_id()
-    
-    args = ["main.py", "check-capacity", "--sku", sku, "-r", region]
+
+    args = ["main.py", "check-capacity", "-r", region, "-c", str(vcpus), "-m", str(memory)]
     if subscription:
         args.extend(["-s", subscription])
-    
+
     console.print(f"\n[dim]Running: {' '.join(args)}[/dim]\n")
     sys.argv = args
     app()

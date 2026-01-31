@@ -1,0 +1,116 @@
+# Ralph Progress Log - Skaelvox VM Evolver Bug Fixes & Improvements
+
+Started: 2026-01-30
+Project: Skaelvox VM Evolver
+Branch: ralph/bug-fixes-improvements
+
+---
+
+## Codebase Patterns
+
+- All Azure SDK imports are wrapped in try/except with feature flags (e.g., AZURE_SDK_AVAILABLE)
+- Rich library is used for all terminal output (console = Console())
+- Thread-safe caching uses threading.Lock() for concurrent access
+- PricingClient uses httpx synchronous client for Azure Retail Prices API
+- VM SKU parsing uses regex patterns in analysis_engine.py (_extract_generation, _extract_family)
+- Settings are managed via Pydantic BaseSettings with .env file support
+- Interactive mode uses sys.argv mutation to invoke Typer commands (fragile pattern, do not change in this PRD)
+- dataclasses are used for all data models (VMInfo, SKUInfo, etc.) rather than Pydantic models
+- Tests use pytest with conftest.py for path setup; pytest.ini at project root
+- retry_on_transient decorator in azure_client.py handles retries with exponential backoff
+- PricingClient supports context manager protocol (__enter__/__exit__)
+- AzureClient._sku_memory_cache is populated via populate_memory_cache() when SKU data is fetched
+
+---
+
+## Progress Log
+
+## 2026-01-30 - US-001: Fix memory utilization calculation bugs
+- Fixed inverted max memory calculation: track min(available_values) separately for correct max usage
+- Changed `any([vm.avg_cpu, vm.avg_memory])` to `is not None` checks in main.py
+- Files changed: azure_client.py, main.py
+- **Learnings for future iterations:**
+  - Azure "Available Memory Bytes" metric is inverse of usage - min available = max usage
+  - Python's `any()` treats 0.0 as False, so metric checks must use `is not None`
+---
+
+## 2026-01-30 - US-002: Fix interactive menu recursion and parameter bugs
+- Converted recursive interactive_menu() to while True loop with try/except for SystemExit
+- Fixed run_interactive_check_capacity() to use --vcpus and --memory instead of invalid --sku
+- Added IntPrompt for numeric inputs in check-capacity interactive mode
+- Files changed: main.py
+- **Learnings for future iterations:**
+  - Typer raises SystemExit after command execution; catch it to continue menu loop
+  - Interactive mode uses sys.argv mutation - validate parameter names match CLI definitions
+---
+
+## 2026-01-30 - US-003: Fix shell injection vulnerability
+- Replaced shell=True subprocess.run with list-form arguments ["az", "account", "show", ...]
+- Files changed: availability_checker.py
+- **Learnings for future iterations:**
+  - Always use list-form subprocess arguments to prevent shell injection
+---
+
+## 2026-01-30 - US-004: Fix data handling inconsistencies
+- Fixed case mismatch: "virtualMachines" -> "virtualmachines" for .lower() comparison
+- Fixed savings_percent: now reads from "savingsPercentage" key with proper float conversion
+- Removed self-referencing southcentralus from its own alternatives list
+- Fixed vm_name extraction: changed len(parts) > 0 to len(parts) > 1
+- Files changed: azure_client.py, config.py
+- **Learnings for future iterations:**
+  - When comparing against .lower(), the literal string must also be lowercase
+  - Azure Advisor extended properties: savingsAmount (monthly $), savingsPercentage (%), annualSavingsAmount (annual $)
+---
+
+## 2026-01-30 - US-005: Replace deprecated datetime.utcnow() calls
+- Replaced all datetime.utcnow() with datetime.now(timezone.utc) across 3 files
+- Fixed default_factory in dataclass field to use lambda
+- Added timezone import where needed
+- Files changed: azure_client.py, analysis_engine.py, availability_checker.py
+- **Learnings for future iterations:**
+  - datetime.utcnow() deprecated in Python 3.12, use datetime.now(timezone.utc)
+  - For dataclass default_factory, use lambda: datetime.now(timezone.utc)
+---
+
+## 2026-01-30 - US-006: Add retry logic and pagination to API calls
+- Added retry_on_transient decorator with exponential backoff (3 retries, 1s/2s/4s)
+- Added _fetch_page() and _fetch_pricing_items() methods for paginated API calls
+- Handles httpx.TimeoutException, HTTPStatusError (429, 500, 502, 503, 504), ConnectError
+- Files changed: azure_client.py
+- **Learnings for future iterations:**
+  - Azure Pricing API returns NextPageLink for pagination
+  - Only retry on transient errors (5xx, 429); 4xx errors should fail immediately
+---
+
+## 2026-01-30 - US-007: Create foundational test suite
+- Created tests/ directory with conftest.py, pytest.ini
+- 57 tests covering: SKU parsing, family extraction, scoring, helpers, pricing, retry, memory conversion
+- Fixed pre-existing syntax error in ai_analyzer.py (unclosed docstring)
+- Files changed: tests/__init__.py, tests/conftest.py, tests/test_analysis_engine.py, tests/test_helpers.py, tests/test_pricing_client.py, tests/test_memory_conversion.py, pytest.ini, ai_analyzer.py
+- **Learnings for future iterations:**
+  - HB is a two-letter family (not just "H")
+  - _get_vm_total_memory_bytes pattern matcher is very broad - use unique prefixes for "no match" tests
+  - ai_analyzer.py had a broken docstring at _format_top_savings (missing closing triple-quote)
+---
+
+## 2026-01-30 - US-008: Replace hardcoded memory lookup with SKU cache
+- Added _sku_memory_cache Dict to AzureClient.__init__
+- Added populate_memory_cache() method that accepts List[SKUInfo]
+- Updated _get_vm_total_memory_bytes() to check dynamic cache before hardcoded fallback
+- Wired up cache population in analysis_engine._get_cached_skus()
+- Files changed: azure_client.py, analysis_engine.py
+- **Learnings for future iterations:**
+  - SKUInfo.memory_gb is already parsed from Azure API capabilities in get_available_skus()
+  - Cache population happens automatically when _get_cached_skus() fetches SKU data
+---
+
+## 2026-01-30 - US-009: Add PricingClient context manager support
+- Added __enter__ and __exit__ methods to PricingClient
+- Existing .close() method preserved for backwards compatibility
+- Files changed: azure_client.py
+- **Learnings for future iterations:**
+  - Context manager just delegates to .close() on exit
+---
+
+ALL STORIES COMPLETE
+All user stories in prd.json have passed. 57 tests passing.
