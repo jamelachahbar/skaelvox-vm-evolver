@@ -451,11 +451,116 @@ def create_detailed_result_panel(result: RightsizingResult) -> Panel:
     )
 
 
+def _analyze_single_subscription(
+    sub_id: str,
+    resource_group: Optional[str],
+    no_metrics: bool,
+    no_ai: bool,
+    no_validation: bool,
+    settings: "Settings",
+    detailed: bool,
+    top: int,
+    min_savings: float,
+    priority_filter: Optional[str],
+    workers: int,
+) -> Optional["AnalysisReport"]:
+    """Helper function to analyze a single subscription and return the report."""
+    from analysis_engine import AnalysisEngine, AnalysisReport
+    
+    try:
+        # Initialize clients
+        azure_client = AzureClient(
+            subscription_id=sub_id,
+            tenant_id=settings.azure_tenant_id,
+            client_id=settings.azure_client_id,
+            client_secret=settings.azure_client_secret,
+        )
+        pricing_client = PricingClient()
+        
+        # Initialize AI analyzer if enabled
+        ai_analyzer = None
+        if not no_ai:
+            if settings.ai_provider == "azure_openai" and settings.azure_openai_endpoint:
+                ai_analyzer = AIAnalyzer(
+                    provider="azure_openai",
+                    azure_endpoint=settings.azure_openai_endpoint,
+                    azure_deployment=settings.azure_openai_deployment,
+                    azure_api_version=settings.azure_openai_api_version,
+                )
+            elif settings.anthropic_api_key:
+                ai_analyzer = AIAnalyzer(
+                    api_key=settings.anthropic_api_key,
+                    model=settings.ai_model,
+                    provider="anthropic",
+                )
+            
+            if ai_analyzer and ai_analyzer.is_available():
+                provider_name = "Azure OpenAI" if settings.ai_provider == "azure_openai" else "Anthropic"
+                console.print(f"[green]✓ AI analysis enabled ({provider_name})[/green]")
+            elif ai_analyzer:
+                console.print("[yellow]⚠ AI analysis not available (check credentials)[/yellow]")
+                ai_analyzer = None
+        
+        # Skælvox Mode status
+        if settings.skaelvox_enabled:
+            fallback_text = "with fallback" if settings.skaelvox_fallback else "strict mode"
+            console.print(f"[bold magenta]🦎✨ Skælvox Mode ACTIVE[/bold magenta] - Evolving VMs +{settings.skaelvox_leap} generations ({fallback_text})")
+        
+        # Create analysis engine
+        engine = AnalysisEngine(
+            azure_client=azure_client,
+            pricing_client=pricing_client,
+            ai_analyzer=ai_analyzer,
+            settings=settings,
+            validate_constraints=not no_validation,
+            check_placement_scores=settings.check_placement_scores,
+            max_workers=workers,
+        )
+        
+        # Run analysis
+        report = engine.analyze_subscription(
+            resource_group=resource_group,
+            include_metrics=not no_metrics,
+            include_ai=not no_ai and ai_analyzer is not None,
+        )
+        
+        # Store subscription info
+        report.subscription_ids = [sub_id]
+        report.subscription_names = [sub_id]  # We don't have name here, use ID
+        
+        # Apply filters
+        filtered_results = report.results
+        if min_savings > 0:
+            filtered_results = [r for r in filtered_results if r.total_potential_savings >= min_savings]
+            console.print(f"[dim]Applied filter: minimum savings >= ${min_savings:.2f}[/dim]")
+        
+        if priority_filter:
+            priority_normalized = priority_filter.capitalize()
+            filtered_results = [r for r in filtered_results if r.priority == priority_normalized]
+            console.print(f"[dim]Applied filter: priority = {priority_normalized}[/dim]")
+        
+        report.results = filtered_results
+        report.vms_with_recommendations = len([r for r in filtered_results if r.total_potential_savings > 0])
+        
+        # Cleanup
+        pricing_client.close()
+        
+        return report
+        
+    except Exception as e:
+        console.print(f"[red]Error analyzing subscription {sub_id}: {e}[/red]")
+        return None
+
+
 @app.command()
 def analyze(
     subscription: Optional[str] = typer.Option(
         None, "--subscription", "-s",
         help="Azure Subscription ID (or set AZURE_SUBSCRIPTION_ID env var)",
+    ),
+    subscriptions: Optional[str] = typer.Option(
+        None, "--subscriptions", "--subs",
+        help="Multiple subscription IDs (comma-separated) for consolidated report",
     ),
     resource_group: Optional[str] = typer.Option(
         None, "--resource-group", "-g",
@@ -567,12 +672,70 @@ def analyze(
     settings.skaelvox_leap = max(1, min(3, skaelvox_leap))  # Clamp to 1-3
     settings.skaelvox_fallback = not no_fallback
     
-    # Get subscription ID
-    sub_id = subscription or settings.azure_subscription_id
-    if not sub_id:
+    # Handle multiple subscriptions for consolidated report
+    sub_list = []
+    if subscriptions:
+        sub_list = [s.strip() for s in subscriptions.split(",") if s.strip()]
+    elif subscription:
+        sub_list = [subscription]
+    elif settings.azure_subscription_id:
+        sub_list = [settings.azure_subscription_id]
+    
+    if not sub_list:
         console.print("[red]Error: Subscription ID required. Use --subscription or set AZURE_SUBSCRIPTION_ID[/red]")
         raise typer.Exit(1)
     
+    # If multiple subscriptions, run analysis for each and merge
+    if len(sub_list) > 1:
+        console.print(f"\n[bold]Analyzing {len(sub_list)} subscriptions (consolidated report)...[/bold]\n")
+        all_reports = []
+        
+        for idx, sub_id in enumerate(sub_list, 1):
+            console.print(f"\n[bold magenta]═══ [{idx}/{len(sub_list)}] Subscription: {sub_id} ═══[/bold magenta]\n")
+            report = _analyze_single_subscription(
+                sub_id=sub_id,
+                resource_group=resource_group,
+                no_metrics=no_metrics,
+                no_ai=no_ai,
+                no_validation=no_validation,
+                settings=settings,
+                detailed=detailed,
+                top=top,
+                min_savings=min_savings,
+                priority_filter=priority_filter,
+                workers=workers,
+            )
+            if report:
+                all_reports.append(report)
+        
+        if not all_reports:
+            console.print("[yellow]No analysis results from any subscription.[/yellow]")
+            raise typer.Exit(0)
+        
+        # Merge all reports
+        from analysis_engine import AnalysisReport
+        merged_report = AnalysisReport.merge(all_reports)
+        
+        # Display consolidated summary
+        console.print("\n[bold cyan]═══ CONSOLIDATED SUMMARY ═══[/bold cyan]\n")
+        console.print(create_summary_panel(merged_report))
+        console.print()
+        
+        if merged_report.results:
+            console.print(create_vm_table(merged_report.results, limit=top))
+        
+        # Export consolidated report
+        if output:
+            try:
+                export_path = export_report(merged_report, output, output_format)
+                console.print(f"\n[green]✓ Consolidated report exported to {export_path}[/green]")
+            except Exception as e:
+                console.print(f"[red]✗ Export failed: {e}[/red]")
+        
+        return
+    
+    # Single subscription analysis
+    sub_id = sub_list[0]
     console.print(f"\n[bold]Starting analysis for subscription:[/bold] {sub_id}\n")
     
     try:
@@ -2172,54 +2335,46 @@ def run_interactive_analyze():
     detailed = Confirm.ask("[cyan]Show detailed results?[/cyan]", default=False)
     
     # Export options
-    export_report = Confirm.ask("[cyan]Export report to file?[/cyan]", default=False)
+    export_report_opt = Confirm.ask("[cyan]Export report to file?[/cyan]", default=False)
     output_file = ""
-    if export_report:
+    if export_report_opt:
         console.print("[dim]  Formats: .html (visual), .csv (Excel), .json (data)[/dim]")
         output_file = Prompt.ask("[cyan]  Output filename[/cyan]", default="report.html")
     
-    # Run for each subscription
-    for sub_id in selected_subs:
-        if len(selected_subs) > 1:
-            sub_name = next((s["name"] for s in _interactive_state.get("selected_subscriptions", []) if s["id"] == sub_id), sub_id)
-            console.print(f"\n[bold magenta]═══ Analyzing: {sub_name} ═══[/bold magenta]\n")
-        
-        args = ["main.py", "analyze", "-s", sub_id]
-        if resource_group:
-            args.extend(["-g", resource_group])
-        if not use_ai:
-            args.append("--no-ai")
-        if detailed:
-            args.append("--detailed")
-        actual_output_file = None
-        if output_file:
-            # For multiple subs, add sub name to filename
-            if len(selected_subs) > 1:
-                base, ext = os.path.splitext(output_file)
-                sub_name = next((s["name"] for s in _interactive_state.get("selected_subscriptions", []) if s["id"] == sub_id), sub_id[:8])
-                safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in sub_name)
-                actual_output_file = f"{base}_{safe_name}{ext}"
-            else:
-                actual_output_file = output_file
-            args.extend(["-o", actual_output_file])
-        
-        console.print(f"[dim]Running: {' '.join(args)}[/dim]\n")
-        sys.argv = args
-        try:
-            app()
-        except SystemExit:
-            pass  # Continue to next subscription
-        
-        # Show clickable link to the report if generated
-        if actual_output_file:
-            full_path = os.path.abspath(actual_output_file)
-            if os.path.exists(full_path):
-                console.print()
-                console.print(f"[bold green]📄 Report generated:[/bold green]")
-                # Use file:// URL for clickable link in terminal
-                file_url = f"file:///{full_path.replace(os.sep, '/')}"
-                console.print(f"   [link={file_url}]{full_path}[/link]")
-                console.print(f"   [dim](Ctrl+Click to open)[/dim]")
+    # Build args for analyze command
+    if len(selected_subs) > 1:
+        # Multi-subscription: use --subscriptions for consolidated report
+        subs_str = ",".join(selected_subs)
+        args = ["main.py", "analyze", "--subscriptions", subs_str]
+    else:
+        args = ["main.py", "analyze", "-s", selected_subs[0]]
+    
+    if resource_group:
+        args.extend(["-g", resource_group])
+    if not use_ai:
+        args.append("--no-ai")
+    if detailed:
+        args.append("--detailed")
+    if output_file:
+        args.extend(["-o", output_file])
+    
+    console.print(f"\n[dim]Running: {' '.join(args)}[/dim]\n")
+    sys.argv = args
+    
+    try:
+        app()
+    except SystemExit:
+        pass
+    
+    # Show clickable link to the report if exported
+    if output_file:
+        full_path = os.path.abspath(output_file)
+        if os.path.exists(full_path):
+            console.print()
+            console.print(f"[bold green]📄 Report generated:[/bold green]")
+            file_url = f"file:///{full_path.replace(os.sep, '/')}"
+            console.print(f"   [link={file_url}]{full_path}[/link]")
+            console.print(f"   [dim](Ctrl+Click to open)[/dim]")
 
 
 def run_interactive_compare_regions():

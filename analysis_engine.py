@@ -101,6 +101,70 @@ class AnalysisReport:
     
     # AI summary
     executive_summary: str = ""
+    
+    # Multi-subscription tracking
+    subscription_ids: List[str] = field(default_factory=list)
+    subscription_names: List[str] = field(default_factory=list)
+    
+    @staticmethod
+    def merge(reports: List["AnalysisReport"]) -> "AnalysisReport":
+        """Merge multiple reports into a single consolidated report."""
+        if not reports:
+            raise ValueError("Cannot merge empty list of reports")
+        
+        if len(reports) == 1:
+            return reports[0]
+        
+        # Consolidate all results
+        all_results = []
+        total_vms = 0
+        analyzed_vms = 0
+        total_current_cost = 0.0
+        total_potential_savings = 0.0
+        vms_with_recommendations = 0
+        shutdown_candidates = 0
+        rightsize_candidates = 0
+        generation_upgrade_candidates = 0
+        region_move_candidates = 0
+        subscription_ids = []
+        subscription_names = []
+        executive_summaries = []
+        
+        for report in reports:
+            all_results.extend(report.results)
+            total_vms += report.total_vms
+            analyzed_vms += report.analyzed_vms
+            total_current_cost += report.total_current_cost
+            total_potential_savings += report.total_potential_savings
+            vms_with_recommendations += report.vms_with_recommendations
+            shutdown_candidates += report.shutdown_candidates
+            rightsize_candidates += report.rightsize_candidates
+            generation_upgrade_candidates += report.generation_upgrade_candidates
+            region_move_candidates += report.region_move_candidates
+            subscription_ids.append(report.subscription_id)
+            if report.executive_summary:
+                executive_summaries.append(report.executive_summary)
+        
+        # Create merged report
+        merged = AnalysisReport(
+            timestamp=datetime.now(),
+            subscription_id=", ".join(subscription_ids[:3]) + ("..." if len(subscription_ids) > 3 else ""),
+            total_vms=total_vms,
+            analyzed_vms=analyzed_vms,
+            results=all_results,
+            total_current_cost=total_current_cost,
+            total_potential_savings=total_potential_savings,
+            vms_with_recommendations=vms_with_recommendations,
+            shutdown_candidates=shutdown_candidates,
+            rightsize_candidates=rightsize_candidates,
+            generation_upgrade_candidates=generation_upgrade_candidates,
+            region_move_candidates=region_move_candidates,
+            executive_summary="\n\n---\n\n".join(executive_summaries) if executive_summaries else "",
+            subscription_ids=subscription_ids,
+            subscription_names=subscription_names,
+        )
+        
+        return merged
 
 
 class AnalysisEngine:
