@@ -37,6 +37,7 @@ from config import Settings, VM_GENERATION_MAP, REGION_ALTERNATIVES
 from azure_client import AzureClient, PricingClient, VMInfo, SKUInfo
 from ai_analyzer import AIAnalyzer
 from analysis_engine import AnalysisEngine, AnalysisReport, RightsizingResult
+from report_exporter import export_report
 
 # Import constraint validator (optional)
 try:
@@ -117,6 +118,15 @@ def create_summary_panel(report: AnalysisReport) -> Panel:
     """Create a summary panel for the analysis report."""
     savings_color = "green" if report.total_potential_savings > 0 else "white"
     
+    # Calculate additional statistics
+    avg_savings_per_vm = 0.0
+    if report.vms_with_recommendations > 0:
+        avg_savings_per_vm = report.total_potential_savings / report.vms_with_recommendations
+    
+    savings_percentage = 0.0
+    if report.total_current_cost > 0:
+        savings_percentage = (report.total_potential_savings / report.total_current_cost) * 100
+    
     content = f"""
 [bold]Analysis Timestamp:[/bold] {report.timestamp.strftime('%Y-%m-%d %H:%M:%S UTC')}
 [bold]Subscription ID:[/bold] {report.subscription_id}
@@ -125,18 +135,25 @@ def create_summary_panel(report: AnalysisReport) -> Panel:
   • Total VMs Discovered: {report.total_vms}
   • VMs Analyzed: {report.analyzed_vms}
   • VMs with Recommendations: {report.vms_with_recommendations}
+  • VMs without Changes Needed: {report.analyzed_vms - report.vms_with_recommendations}
 
 [bold cyan]💰 Cost Summary[/bold cyan]
   • Current Monthly Cost: {format_currency(report.total_current_cost)}
   • Potential Monthly Savings: [{savings_color}]{format_currency(report.total_potential_savings)}[/{savings_color}]
   • Potential Annual Savings: [{savings_color}]{format_currency(report.total_potential_savings * 12)}[/{savings_color}]
-  • Savings Percentage: [{savings_color}]{format_percent(report.total_potential_savings / report.total_current_cost * 100) if report.total_current_cost > 0 else '0%'}[/{savings_color}]
+  • Savings Percentage: [{savings_color}]{format_percent(savings_percentage)}[/{savings_color}]
+  • Avg Savings per Optimized VM: [{savings_color}]{format_currency(avg_savings_per_vm)}[/{savings_color}]
 
 [bold cyan]📋 Recommendation Breakdown[/bold cyan]
   • 🔴 Shutdown Candidates: {report.shutdown_candidates}
   • 📐 Rightsize Candidates: {report.rightsize_candidates}
   • ⬆️  Generation Upgrades: {report.generation_upgrade_candidates}
   • 🌍 Region Move Candidates: {report.region_move_candidates}
+
+[bold cyan]🎯 ROI Metrics[/bold cyan]
+  • Monthly ROI: [{savings_color}]{format_currency(report.total_potential_savings)} / month[/{savings_color}]
+  • Annual ROI: [{savings_color}]{format_currency(report.total_potential_savings * 12)} / year[/{savings_color}]
+  • Optimization Rate: [{savings_color}]{format_percent(report.vms_with_recommendations / report.total_vms * 100 if report.total_vms > 0 else 0)}[/{savings_color}] of VMs have optimization opportunities
 """
     
     return Panel(
@@ -359,7 +376,11 @@ def analyze(
     ),
     output: Optional[str] = typer.Option(
         None, "--output", "-o",
-        help="Output file path (JSON format)",
+        help="Output file path (format auto-detected from extension: .json, .csv, .html)",
+    ),
+    format: Optional[str] = typer.Option(
+        None, "--format", "-f",
+        help="Output format override (json, csv, html). Auto-detected from file extension if not specified.",
     ),
     detailed: bool = typer.Option(
         False, "--detailed", "-d",
@@ -368,6 +389,14 @@ def analyze(
     top: int = typer.Option(
         20, "--top", "-t",
         help="Number of top recommendations to show",
+    ),
+    min_savings: float = typer.Option(
+        0.0, "--min-savings",
+        help="Filter: Only show VMs with monthly savings >= this amount (default: 0)",
+    ),
+    priority_filter: Optional[str] = typer.Option(
+        None, "--priority",
+        help="Filter: Only show VMs with this priority (High, Medium, Low)",
     ),
     workers: int = typer.Option(
         10, "--workers", "-w",
@@ -494,6 +523,24 @@ def analyze(
             include_ai=not no_ai and ai_analyzer is not None,
         )
         
+        # Apply filters to results
+        filtered_results = report.results
+        
+        # Filter by minimum savings
+        if min_savings > 0:
+            filtered_results = [r for r in filtered_results if r.total_potential_savings >= min_savings]
+            console.print(f"[dim]Applied filter: minimum savings >= ${min_savings:.2f}[/dim]")
+        
+        # Filter by priority
+        if priority_filter:
+            priority_normalized = priority_filter.capitalize()
+            filtered_results = [r for r in filtered_results if r.priority == priority_normalized]
+            console.print(f"[dim]Applied filter: priority = {priority_normalized}[/dim]")
+        
+        # Update report with filtered results
+        report.results = filtered_results
+        report.vms_with_recommendations = len([r for r in filtered_results if r.total_potential_savings > 0])
+        
         # Display results
         console.print()
         console.print(create_summary_panel(report))
@@ -522,36 +569,24 @@ def analyze(
         
         # Save to file if requested
         if output:
-            import json
-            
-            output_data = {
-                "timestamp": report.timestamp.isoformat(),
-                "subscription_id": report.subscription_id,
-                "summary": {
-                    "total_vms": report.total_vms,
-                    "analyzed_vms": report.analyzed_vms,
-                    "vms_with_recommendations": report.vms_with_recommendations,
-                    "total_current_cost": report.total_current_cost,
-                    "total_potential_savings": report.total_potential_savings,
-                },
-                "results": [
-                    {
-                        "vm_name": r.vm.name,
-                        "resource_group": r.vm.resource_group,
-                        "current_sku": r.vm.vm_size,
-                        "recommendation_type": r.recommendation_type,
-                        "potential_savings": r.total_potential_savings,
-                        "priority": r.priority,
-                        "ranked_alternatives": r.ranked_alternatives[:5],
-                    }
-                    for r in report.results
-                ],
-            }
-            
-            with open(output, "w") as f:
-                json.dump(output_data, f, indent=2)
-            
-            console.print(f"\n[green]✓ Results saved to {output}[/green]")
+            try:
+                export_path = export_report(report, output, format)
+                
+                # Determine format for display message
+                detected_format = format or output.split('.')[-1].upper()
+                console.print(f"\n[green]✓ Results exported to {export_path} ({detected_format} format)[/green]")
+                
+                # Show helpful info based on format
+                if detected_format.lower() in ['csv', 'excel']:
+                    console.print("[dim]   → Open with Excel or any spreadsheet application[/dim]")
+                elif detected_format.lower() == 'html':
+                    console.print("[dim]   → Open in web browser for interactive viewing[/dim]")
+                elif detected_format.lower() == 'json':
+                    console.print("[dim]   → Use with automation tools or custom scripts[/dim]")
+            except ValueError as e:
+                console.print(f"[red]✗ Export failed: {e}[/red]")
+            except Exception as e:
+                console.print(f"[red]✗ Unexpected error during export: {e}[/red]")
         
         # Cleanup
         pricing_client.close()

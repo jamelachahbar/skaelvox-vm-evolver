@@ -205,22 +205,25 @@ class AnalysisEngine:
         ) as progress:
             
             # Step 1: List VMs
-            task1 = progress.add_task("[cyan]Discovering VMs...", total=None)
+            task1 = progress.add_task("[cyan]🔍 Discovering VMs in subscription...", total=None)
             vms = self.azure_client.list_vms(resource_group)
             report.total_vms = len(vms)
             progress.update(task1, completed=True, total=1)
             
             if not vms:
-                console.print("[yellow]No VMs found in the specified scope.[/yellow]")
+                console.print("[yellow]⚠️  No VMs found in the specified scope.[/yellow]")
                 return report
             
-            console.print(f"[green]Found {len(vms)} VMs[/green]")
+            console.print(f"[green]✓ Discovered {len(vms)} VMs[/green]")
             
             # Step 2: Get Advisor recommendations
-            task2 = progress.add_task("[cyan]Fetching Advisor recommendations...", total=None)
+            task2 = progress.add_task("[cyan]💡 Fetching Azure Advisor recommendations...", total=None)
             advisor_recs = self.azure_client.get_advisor_recommendations()
             progress.update(task2, completed=True, total=1)
-            console.print(f"[green]Found {len(advisor_recs)} Advisor recommendations[/green]")
+            if advisor_recs:
+                console.print(f"[green]✓ Found {len(advisor_recs)} Advisor recommendations[/green]")
+            else:
+                console.print(f"[dim]ℹ️  No Advisor recommendations available[/dim]")
             
             # Step 3: Pre-fetch data in parallel (optimization)
             locations = [vm.location for vm in vms]
@@ -228,7 +231,10 @@ class AnalysisEngine:
             self._prefetch_pricing_data(vms, progress)
             
             # Step 4: Analyze VMs concurrently using ThreadPoolExecutor
-            task3 = progress.add_task("[cyan]Analyzing VMs...", total=len(vms))
+            task3 = progress.add_task(
+                f"[cyan]🔬 Analyzing {len(vms)} VMs (using {self.max_workers} workers)...", 
+                total=len(vms)
+            )
             
             results_lock = threading.Lock()
             
@@ -271,15 +277,17 @@ class AnalysisEngine:
                             
                             report.analyzed_vms += 1
                     except TimeoutError:
-                        console.print(f"[yellow]Warning: Timeout analyzing VM {vm.name}[/yellow]")
+                        console.print(f"[yellow]⚠️  Warning: Timeout analyzing VM {vm.name} (exceeded 60s limit)[/yellow]")
                     except Exception as e:
-                        console.print(f"[yellow]Warning: Failed to analyze VM {vm.name}: {e}[/yellow]")
+                        console.print(f"[yellow]⚠️  Warning: Failed to analyze VM {vm.name}: {str(e)[:100]}[/yellow]")
                     
                     progress.update(task3, advance=1)
             
+            console.print(f"[green]✓ Completed analysis of {report.analyzed_vms}/{len(vms)} VMs[/green]")
+            
             # Step 5: Generate AI summary
             if include_ai and self.ai_analyzer and self.ai_analyzer.is_available():
-                task4 = progress.add_task("[cyan]Generating AI summary...", total=None)
+                task4 = progress.add_task("[cyan]🤖 Generating AI executive summary...", total=None)
                 ai_recommendations = [r.ai_recommendation for r in report.results if r.ai_recommendation]
                 report.executive_summary = self.ai_analyzer.generate_summary_report(
                     vms=vms,
@@ -287,6 +295,7 @@ class AnalysisEngine:
                     total_savings=report.total_potential_savings,
                 )
                 progress.update(task4, completed=True, total=1)
+                console.print(f"[green]✓ AI summary generated[/green]")
         
         # Sort results by potential savings (highest first)
         report.results.sort(key=lambda r: r.total_potential_savings, reverse=True)
