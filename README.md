@@ -179,6 +179,21 @@ python main.py analyze -s <sub-id> --detailed --top 10
 
 # Export to JSON
 python main.py analyze -s <sub-id> --output results.json
+
+# Export to CSV (Excel-compatible)
+python main.py analyze -s <sub-id> --output results.csv
+
+# Export to HTML (rich visual report)
+python main.py analyze -s <sub-id> --output results.html
+
+# Filter by minimum savings
+python main.py analyze -s <sub-id> --min-savings 50
+
+# Filter by priority
+python main.py analyze -s <sub-id> --priority High
+
+# Show usage examples
+python main.py examples
 ```
 
 ## Commands
@@ -189,13 +204,40 @@ python main.py analyze -s <sub-id> --output results.json
 python main.py analyze [OPTIONS]
 
 Options:
-  -s, --subscription TEXT    Azure Subscription ID
-  -g, --resource-group TEXT  Filter to specific resource group
-  --no-metrics              Skip performance metrics (faster)
-  --no-ai                   Skip AI analysis
-  -d, --detailed            Show detailed per-VM analysis
-  -t, --top INTEGER         Number of results to show [default: 20]
-  -o, --output TEXT         Export results to JSON file
+  -s, --subscription TEXT       Azure Subscription ID
+  -g, --resource-group TEXT     Filter to specific resource group
+  --no-metrics                  Skip performance metrics (faster)
+  --no-ai                       Skip AI analysis
+  -d, --detailed                Show detailed per-VM analysis
+  -t, --top INTEGER             Number of results to show [default: 20]
+  -o, --output TEXT             Export results (format auto-detected: .json, .csv, .html)
+  -f, --format TEXT             Force output format (json, csv, html)
+  --min-savings FLOAT           Filter: Show only VMs with savings >= amount
+  --priority TEXT               Filter: Show only specific priority (High, Medium, Low)
+  -w, --workers INTEGER         Concurrent workers for parallel processing [default: 10]
+  --leap INTEGER                Skælvox generation leap distance (1-3) [default: 2]
+  --no-evolve                   Disable Skælvox generation evolution
+  --no-fallback                 Skælvox strict mode (no fallback to older generations)
+```
+
+**New Export Formats:**
+- **JSON**: Structured data for automation and APIs
+- **CSV**: Excel-compatible spreadsheet with 22 columns
+- **HTML**: Beautiful responsive report with embedded CSS and charts
+
+**Example Usage:**
+```bash
+# Basic analysis with HTML export
+python main.py analyze -s <sub-id> -o report.html
+
+# Filter high-priority items with savings >= $100
+python main.py analyze -s <sub-id> --priority High --min-savings 100
+
+# Fast analysis for large subscriptions
+python main.py analyze -s <sub-id> --no-metrics --no-ai --workers 20
+
+# Detailed CSV export for Excel analysis
+python main.py analyze -s <sub-id> --detailed -o analysis.csv
 ```
 
 **Example Output:**
@@ -577,6 +619,121 @@ The tool requires these Azure RBAC permissions:
     "location": "westeurope",
     "zones": ["1", "2", "3"]
 }
+```
+
+## 📊 Export Formats & Reporting
+
+Skælvox VM Evolver supports multiple export formats to suit different use cases:
+
+### JSON Export
+**Best for:** Automation, APIs, custom processing
+```bash
+python main.py analyze -s <sub-id> -o results.json
+```
+
+**Features:**
+- Structured data with full analysis details
+- Includes all recommendations and alternatives
+- Perfect for CI/CD pipelines and automation
+- Machine-readable format
+
+### CSV Export
+**Best for:** Excel analysis, spreadsheets, data analysis
+```bash
+python main.py analyze -s <sub-id> -o results.csv
+```
+
+**Features:**
+- 22 comprehensive columns including:
+  - VM details (name, resource group, location, SKU)
+  - Cost analysis (current, recommended, savings)
+  - Performance metrics (CPU, memory utilization)
+  - Recommendations (type, priority, confidence)
+  - Deployment feasibility and constraints
+- Excel-compatible for pivot tables and charts
+- Easy filtering and sorting in spreadsheet apps
+
+### HTML Export
+**Best for:** Executive reports, presentations, sharing with stakeholders
+```bash
+python main.py analyze -s <sub-id> -o report.html
+```
+
+**Features:**
+- Beautiful responsive design with embedded CSS
+- Color-coded priority and status indicators
+- Summary cards with key metrics
+- Detailed breakdown tables
+- AI executive summary (if available)
+- No external dependencies - single self-contained file
+- Print-friendly layout
+
+### Format Auto-Detection
+The tool automatically detects the format from the file extension:
+```bash
+# Automatically creates JSON
+python main.py analyze -s <sub-id> -o output.json
+
+# Automatically creates CSV
+python main.py analyze -s <sub-id> -o output.csv
+
+# Automatically creates HTML
+python main.py analyze -s <sub-id> -o output.html
+```
+
+### Force Specific Format
+Override auto-detection with the `--format` flag:
+```bash
+# Force HTML format even without extension
+python main.py analyze -s <sub-id> -o report --format html
+```
+
+## 🔍 Filtering & Sorting
+
+### Filter by Minimum Savings
+Show only VMs with significant cost reduction opportunities:
+```bash
+# Show only VMs with monthly savings >= $50
+python main.py analyze -s <sub-id> --min-savings 50
+
+# Focus on high-value optimizations (>= $100/month)
+python main.py analyze -s <sub-id> --min-savings 100
+```
+
+### Filter by Priority
+Focus on recommendations by priority level:
+```bash
+# Show only high-priority recommendations
+python main.py analyze -s <sub-id> --priority High
+
+# Show medium-priority items
+python main.py analyze -s <sub-id> --priority Medium
+
+# Show low-priority items
+python main.py analyze -s <sub-id> --priority Low
+```
+
+### Combine Filters
+Stack multiple filters for precise results:
+```bash
+# High-priority items with significant savings
+python main.py analyze -s <sub-id> --priority High --min-savings 100
+
+# Medium-priority items in specific resource group
+python main.py analyze -s <sub-id> -g production-rg --priority Medium
+
+# High-value items with detailed output and HTML export
+python main.py analyze -s <sub-id> --min-savings 75 --detailed -o report.html
+```
+
+### Limit Results
+Control the number of results displayed:
+```bash
+# Show top 10 recommendations
+python main.py analyze -s <sub-id> --top 10
+
+# Show top 50 recommendations
+python main.py analyze -s <sub-id> --top 50
 ```
 
 ## 🤝 Integration Ideas

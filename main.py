@@ -2131,5 +2131,175 @@ def run_interactive_find_alternatives():
     app()
 
 
+@app.command()
+def examples():
+    """
+    📚 Show usage examples for common scenarios.
+    
+    Displays practical examples for various use cases.
+    """
+    create_header()
+    
+    examples_text = """
+# 📚 Skælvox VM Evolver - Usage Examples
+
+## Basic Analysis
+
+### Analyze all VMs in a subscription
+```bash
+python main.py analyze --subscription <sub-id>
+```
+
+### Analyze with specific filters
+```bash
+# Filter by resource group
+python main.py analyze -s <sub-id> -g production-rg
+
+# Show only high-priority recommendations
+python main.py analyze -s <sub-id> --priority High
+
+# Show only VMs with savings >= $50/month
+python main.py analyze -s <sub-id> --min-savings 50
+
+# Combine filters
+python main.py analyze -s <sub-id> --priority High --min-savings 100
+```
+
+## Export Options
+
+### Export to different formats (auto-detected by extension)
+```bash
+# Export to JSON (structured data)
+python main.py analyze -s <sub-id> -o results.json
+
+# Export to CSV (Excel-compatible)
+python main.py analyze -s <sub-id> -o results.csv
+
+# Export to HTML (rich visual report)
+python main.py analyze -s <sub-id> -o results.html
+```
+
+### Force specific format
+```bash
+python main.py analyze -s <sub-id> -o report --format html
+```
+
+## Advanced Analysis
+
+### Fast analysis (skip metrics and AI)
+```bash
+python main.py analyze -s <sub-id> --no-metrics --no-ai
+```
+
+### Detailed per-VM analysis
+```bash
+python main.py analyze -s <sub-id> --detailed --top 10
+```
+
+### Control Skælvox generation evolution
+```bash
+# Conservative: 1-generation leap (v3 → v4)
+python main.py analyze -s <sub-id> --leap 1
+
+# Aggressive: 3-generation leap (v3 → v6)
+python main.py analyze -s <sub-id> --leap 3
+
+# Strict mode: Only recommend target generation (no fallback)
+python main.py analyze -s <sub-id> --no-fallback
+
+# Disable generation evolution entirely
+python main.py analyze -s <sub-id> --no-evolve
+```
+
+### Adjust concurrent processing
+```bash
+# Use more workers for faster analysis (default: 10)
+python main.py analyze -s <sub-id> --workers 20
+
+# Use fewer workers for slower connections
+python main.py analyze -s <sub-id> --workers 5
+```
+
+## SKU Operations
+
+### Check SKU availability
+```bash
+python main.py check-availability --sku Standard_D16ds_v5 --region eastus2
+```
+
+### Find alternative SKUs
+```bash
+python main.py find-alternatives --sku Standard_D16ds_v5 --region eastus2 --min-similarity 70
+```
+
+### Compare regions for a VM
+```bash
+python main.py compare-regions --vm web-server-01 --resource-group production-rg
+```
+
+### Rank SKUs by specifications
+```bash
+python main.py rank-skus --vcpus 4 --memory 16 --region westeurope
+```
+
+## Automation & CI/CD
+
+### GitHub Actions workflow example
+```yaml
+- name: Analyze VMs
+  run: |
+    python main.py analyze \\
+      -s ${{ secrets.AZURE_SUBSCRIPTION_ID }} \\
+      --no-ai \\
+      --output results.csv
+```
+
+### Scheduled analysis with email
+```bash
+# cron job example (daily at 6 AM)
+0 6 * * * cd /path/to/tool && \\
+  python main.py analyze -s <sub-id> -o /reports/$(date +\\%Y\\%m\\%d).html && \\
+  mail -s "Azure VM Report" user@example.com < /reports/$(date +\\%Y\\%m\\%d).html
+```
+
+## Tips & Best Practices
+
+### 1. Start with a quick scan
+```bash
+python main.py analyze -s <sub-id> --no-metrics --top 20
+```
+
+### 2. Export to HTML for management reports
+```bash
+python main.py analyze -s <sub-id> -o executive-report.html
+```
+
+### 3. Export to CSV for detailed analysis in Excel
+```bash
+python main.py analyze -s <sub-id> -o detailed-analysis.csv
+```
+
+### 4. Focus on high-value optimizations
+```bash
+python main.py analyze -s <sub-id> --min-savings 100 --priority High
+```
+
+### 5. Test recommendations in a specific resource group first
+```bash
+python main.py analyze -s <sub-id> -g dev-rg --detailed
+```
+
+For more information, visit: https://github.com/jamelachahbar/skaelvox-vm-evolver
+"""
+    
+    console.print(Panel(
+        Markdown(examples_text),
+        title="[bold cyan]📚 Usage Examples[/bold cyan]",
+        border_style="cyan",
+        box=box.ROUNDED,
+        padding=(1, 2),
+    ))
+
+
 if __name__ == "__main__":
     main()
