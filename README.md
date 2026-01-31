@@ -59,6 +59,16 @@ Like a chameleon, Skælvox helps your VMs evolve to newer generations while grac
 - **Weighted Rankings**: Customizable ranking criteria
 - **Feature Comparison**: Premium storage, accelerated networking, etc.
 
+### Azure Spot Placement Score Integration
+
+- **Allocation Probability**: Check VM deployment success probability before provisioning
+- **Zone-Level Scores**: Get placement scores per availability zone (High/Medium/Low)
+- **Regional Scores**: Assess deployment probability at regional level
+- **API Integration**: Uses Azure Spot Placement Score API for real-time capacity insights
+- **Risk Assessment**: Make informed decisions about SKU and region selection
+
+Enable with `CHECK_PLACEMENT_SCORES=true` in your `.env` file or via configuration.
+
 ### Professional Terminal UI
 
 - **Clean ASCII Art Header**: Gradient-colored SKAELVOX logo
@@ -274,6 +284,9 @@ python main.py check-availability -k Standard_E8s_v5 -r westeurope \
   --endpoint "https://your-dce.ingest.monitor.azure.com" \
   --rule-id "dcr-xxxxx"
 
+# With placement scores enabled (requires CHECK_PLACEMENT_SCORES=true in .env)
+python main.py check-availability -k Standard_D4s_v5 -r eastus
+
 Options:
   -k, --sku TEXT         VM SKU to check (required)
   -r, --region TEXT      Azure region [default: eastus2]
@@ -284,6 +297,12 @@ Options:
   --rule-id TEXT        Log Analytics Data Collection Rule ID
   -o, --output TEXT     Output results to JSON file
 ```
+
+**Placement Scores:**
+When `CHECK_PLACEMENT_SCORES=true` is set, the tool queries the Azure Spot Placement Score API to show deployment success probability:
+- **High**: 🟢 Very likely to succeed
+- **Medium**: 🟡 May succeed, have backup plan
+- **Low**: 🔴 Unlikely to succeed, consider alternatives
 
 **Example Output:**
 ```

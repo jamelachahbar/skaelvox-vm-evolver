@@ -1510,7 +1510,10 @@ def check_availability(
         console.print(f"\n[bold]Checking availability for:[/bold] {sku} in {region}\n")
         
         with console.status("[bold cyan]Checking SKU availability..."):
-            checker = SKUAvailabilityChecker(subscription_id=sub_id)
+            checker = SKUAvailabilityChecker(
+                subscription_id=sub_id,
+                check_placement_scores=settings.check_placement_scores,
+            )
             result = checker.check_sku_availability(
                 sku_name=sku,
                 region=region,
@@ -1595,7 +1598,10 @@ def check_availability_multi(
         console.print(f"[bold]Regions:[/bold] {', '.join(region_list)}\n")
         
         with console.status("[bold cyan]Checking availability across regions..."):
-            checker = SKUAvailabilityChecker(subscription_id=sub_id)
+            checker = SKUAvailabilityChecker(
+                subscription_id=sub_id,
+                check_placement_scores=settings.check_placement_scores,
+            )
             results = checker.check_sku_across_regions(
                 sku_name=sku,
                 regions=region_list,
@@ -1650,7 +1656,10 @@ def find_alternatives(
         console.print(f"\n[bold]Finding alternatives for:[/bold] {sku} in {region}\n")
         
         with console.status("[bold cyan]Searching for similar SKUs..."):
-            checker = SKUAvailabilityChecker(subscription_id=sub_id)
+            checker = SKUAvailabilityChecker(
+                subscription_id=sub_id,
+                check_placement_scores=settings.check_placement_scores,
+            )
             result = checker.check_sku_availability(
                 sku_name=sku,
                 region=region,
