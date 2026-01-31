@@ -746,6 +746,26 @@ class SKUAvailabilityChecker:
         return results
 
 
+def _get_placement_score_color(score: str) -> str:
+    """
+    Get the display color for a placement score.
+    
+    Args:
+        score: Placement score (High, Medium, Low, or Unknown)
+        
+    Returns:
+        Color string for Rich formatting
+    """
+    if score == "High":
+        return "green"
+    elif score == "Medium":
+        return "yellow"
+    elif score == "Low":
+        return "red"
+    else:
+        return "dim"
+
+
 def display_availability_result(
     result: SKUAvailabilityResult,
     show_specs: bool = True,
@@ -796,7 +816,7 @@ def display_availability_result(
                 # Add placement score if available
                 if result.zone_placement_scores:
                     score = result.zone_placement_scores.get(zone, "Unknown")
-                    score_color = "green" if score == "High" else "yellow" if score == "Medium" else "red" if score == "Low" else "dim"
+                    score_color = _get_placement_score_color(score)
                     row_data.append(f"[{score_color}]{score}[/{score_color}]")
                 
                 zone_table.add_row(*row_data)
@@ -805,7 +825,7 @@ def display_availability_result(
                 row_data = [zone, "✅", "[green]Available[/green]"]
                 if result.zone_placement_scores:
                     score = result.zone_placement_scores.get(zone, "Unknown")
-                    score_color = "green" if score == "High" else "yellow" if score == "Medium" else "red" if score == "Low" else "dim"
+                    score_color = _get_placement_score_color(score)
                     row_data.append(f"[{score_color}]{score}[/{score_color}]")
                 zone_table.add_row(*row_data)
         
@@ -816,7 +836,7 @@ def display_availability_result(
     
     # Regional Placement Score (if not zonal)
     if result.placement_score != "Unknown" and not result.zone_placement_scores:
-        score_color = "green" if result.placement_score == "High" else "yellow" if result.placement_score == "Medium" else "red" if result.placement_score == "Low" else "dim"
+        score_color = _get_placement_score_color(result.placement_score)
         console.print(f"\n[bold]🎯 Spot Placement Score:[/bold] [{score_color}]{result.placement_score}[/{score_color}]")
     
     # Specifications
