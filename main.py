@@ -37,6 +37,7 @@ from config import Settings, VM_GENERATION_MAP, REGION_ALTERNATIVES
 from azure_client import AzureClient, PricingClient, VMInfo, SKUInfo
 from ai_analyzer import AIAnalyzer
 from analysis_engine import AnalysisEngine, AnalysisReport, RightsizingResult
+from report_exporter import export_report
 
 # Import constraint validator (optional)
 try:
@@ -114,8 +115,29 @@ def get_confidence_color(confidence: str) -> str:
 
 
 def create_summary_panel(report: AnalysisReport) -> Panel:
-    """Create a summary panel for the analysis report."""
+    """Create a summary panel for the analysis report.
+    
+    Note: This panel shows overall statistics from the analysis.
+    If filters are applied, the displayed results table may show fewer VMs.
+    """
     savings_color = "green" if report.total_potential_savings > 0 else "white"
+    
+    # Calculate additional statistics
+    avg_savings_per_vm = 0.0
+    if report.vms_with_recommendations > 0:
+        avg_savings_per_vm = report.total_potential_savings / report.vms_with_recommendations
+    
+    savings_percentage = 0.0
+    if report.total_current_cost > 0:
+        savings_percentage = (report.total_potential_savings / report.total_current_cost) * 100
+    
+    # Safely calculate VMs without changes (handle filtered results)
+    vms_without_changes = max(0, report.analyzed_vms - report.vms_with_recommendations)
+    
+    # Calculate optimization rate (based on original analysis before filtering)
+    optimization_rate = 0.0
+    if report.total_vms > 0:
+        optimization_rate = (report.vms_with_recommendations / report.total_vms) * 100
     
     content = f"""
 [bold]Analysis Timestamp:[/bold] {report.timestamp.strftime('%Y-%m-%d %H:%M:%S UTC')}
@@ -125,18 +147,25 @@ def create_summary_panel(report: AnalysisReport) -> Panel:
   • Total VMs Discovered: {report.total_vms}
   • VMs Analyzed: {report.analyzed_vms}
   • VMs with Recommendations: {report.vms_with_recommendations}
+  • VMs without Changes Needed: {vms_without_changes}
 
 [bold cyan]💰 Cost Summary[/bold cyan]
   • Current Monthly Cost: {format_currency(report.total_current_cost)}
   • Potential Monthly Savings: [{savings_color}]{format_currency(report.total_potential_savings)}[/{savings_color}]
   • Potential Annual Savings: [{savings_color}]{format_currency(report.total_potential_savings * 12)}[/{savings_color}]
-  • Savings Percentage: [{savings_color}]{format_percent(report.total_potential_savings / report.total_current_cost * 100) if report.total_current_cost > 0 else '0%'}[/{savings_color}]
+  • Savings Percentage: [{savings_color}]{format_percent(savings_percentage)}[/{savings_color}]
+  • Avg Savings per Optimized VM: [{savings_color}]{format_currency(avg_savings_per_vm)}[/{savings_color}]
 
 [bold cyan]📋 Recommendation Breakdown[/bold cyan]
   • 🔴 Shutdown Candidates: {report.shutdown_candidates}
   • 📐 Rightsize Candidates: {report.rightsize_candidates}
   • ⬆️  Generation Upgrades: {report.generation_upgrade_candidates}
   • 🌍 Region Move Candidates: {report.region_move_candidates}
+
+[bold cyan]🎯 ROI Metrics[/bold cyan]
+  • Monthly ROI: [{savings_color}]{format_currency(report.total_potential_savings)} / month[/{savings_color}]
+  • Annual ROI: [{savings_color}]{format_currency(report.total_potential_savings * 12)} / year[/{savings_color}]
+  • Optimization Potential: [{savings_color}]{format_percent(optimization_rate)}[/{savings_color}] of VMs have optimization opportunities
 """
     
     return Panel(
@@ -364,7 +393,11 @@ def analyze(
     ),
     output: Optional[str] = typer.Option(
         None, "--output", "-o",
-        help="Output file path (JSON format)",
+        help="Output file path (format auto-detected from extension: .json, .csv, .html)",
+    ),
+    output_format: Optional[str] = typer.Option(
+        None, "--format", "-f",
+        help="Output format override (json, csv, html). Auto-detected from file extension if not specified.",
     ),
     detailed: bool = typer.Option(
         False, "--detailed", "-d",
@@ -373,6 +406,14 @@ def analyze(
     top: int = typer.Option(
         20, "--top", "-t",
         help="Number of top recommendations to show",
+    ),
+    min_savings: float = typer.Option(
+        0.0, "--min-savings",
+        help="Filter: Only show VMs with monthly savings >= this amount (default: 0)",
+    ),
+    priority_filter: Optional[str] = typer.Option(
+        None, "--priority",
+        help="Filter: Only show VMs with this priority (High, Medium, Low)",
     ),
     workers: int = typer.Option(
         10, "--workers", "-w",
@@ -512,6 +553,31 @@ def analyze(
             include_ai=not no_ai and ai_analyzer is not None,
         )
         
+        # Store original counts before filtering for accurate statistics
+        original_total_vms = report.total_vms
+        original_vms_with_recommendations = report.vms_with_recommendations
+        
+        # Apply filters to results
+        filtered_results = report.results
+        
+        # Filter by minimum savings
+        if min_savings > 0:
+            filtered_results = [r for r in filtered_results if r.total_potential_savings >= min_savings]
+            console.print(f"[dim]Applied filter: minimum savings >= ${min_savings:.2f}[/dim]")
+        
+        # Filter by priority
+        if priority_filter:
+            priority_normalized = priority_filter.capitalize()
+            filtered_results = [r for r in filtered_results if r.priority == priority_normalized]
+            console.print(f"[dim]Applied filter: priority = {priority_normalized}[/dim]")
+        
+        # Update report with filtered results but preserve original total counts
+        report.results = filtered_results
+        # Recalculate filtered count
+        report.vms_with_recommendations = len([r for r in filtered_results if r.total_potential_savings > 0])
+        # Keep original total_vms and analyzed_vms for context
+        # This allows users to see "X filtered out of Y total"
+        
         # Display results
         console.print()
         console.print(create_summary_panel(report))
@@ -540,36 +606,28 @@ def analyze(
         
         # Save to file if requested
         if output:
-            import json
-            
-            output_data = {
-                "timestamp": report.timestamp.isoformat(),
-                "subscription_id": report.subscription_id,
-                "summary": {
-                    "total_vms": report.total_vms,
-                    "analyzed_vms": report.analyzed_vms,
-                    "vms_with_recommendations": report.vms_with_recommendations,
-                    "total_current_cost": report.total_current_cost,
-                    "total_potential_savings": report.total_potential_savings,
-                },
-                "results": [
-                    {
-                        "vm_name": r.vm.name,
-                        "resource_group": r.vm.resource_group,
-                        "current_sku": r.vm.vm_size,
-                        "recommendation_type": r.recommendation_type,
-                        "potential_savings": r.total_potential_savings,
-                        "priority": r.priority,
-                        "ranked_alternatives": r.ranked_alternatives[:5],
-                    }
-                    for r in report.results
-                ],
-            }
-            
-            with open(output, "w") as f:
-                json.dump(output_data, f, indent=2)
-            
-            console.print(f"\n[green]✓ Results saved to {output}[/green]")
+            try:
+                export_path = export_report(report, output, output_format)
+                
+                # Determine format for display message
+                from pathlib import Path
+                detected_format = output_format or Path(output).suffix.lstrip('.') or 'json'
+                detected_format = detected_format.upper()
+                
+                console.print(f"\n[green]✓ Results exported to {export_path} ({detected_format} format)[/green]")
+                
+                # Show helpful info based on format
+                format_lower = detected_format.lower()
+                if format_lower in ['csv', 'excel']:
+                    console.print("[dim]   → Open with Excel or any spreadsheet application[/dim]")
+                elif format_lower == 'html':
+                    console.print("[dim]   → Open in web browser for interactive viewing[/dim]")
+                elif format_lower == 'json':
+                    console.print("[dim]   → Use with automation tools or custom scripts[/dim]")
+            except ValueError as e:
+                console.print(f"[red]✗ Export failed: {e}[/red]")
+            except Exception as e:
+                console.print(f"[red]✗ Unexpected error during export: {e}[/red]")
         
         # Cleanup
         pricing_client.close()
@@ -2117,6 +2175,176 @@ def run_interactive_find_alternatives():
     console.print(f"\n[dim]Running: {' '.join(args)}[/dim]\n")
     sys.argv = args
     app()
+
+
+@app.command()
+def examples():
+    """
+    📚 Show usage examples for common scenarios.
+    
+    Displays practical examples for various use cases.
+    """
+    create_header()
+    
+    examples_text = """
+# 📚 Skælvox VM Evolver - Usage Examples
+
+## Basic Analysis
+
+### Analyze all VMs in a subscription
+```bash
+python main.py analyze --subscription <sub-id>
+```
+
+### Analyze with specific filters
+```bash
+# Filter by resource group
+python main.py analyze -s <sub-id> -g production-rg
+
+# Show only high-priority recommendations
+python main.py analyze -s <sub-id> --priority High
+
+# Show only VMs with savings >= $50/month
+python main.py analyze -s <sub-id> --min-savings 50
+
+# Combine filters
+python main.py analyze -s <sub-id> --priority High --min-savings 100
+```
+
+## Export Options
+
+### Export to different formats (auto-detected by extension)
+```bash
+# Export to JSON (structured data)
+python main.py analyze -s <sub-id> -o results.json
+
+# Export to CSV (Excel-compatible)
+python main.py analyze -s <sub-id> -o results.csv
+
+# Export to HTML (rich visual report)
+python main.py analyze -s <sub-id> -o results.html
+```
+
+### Force specific format
+```bash
+python main.py analyze -s <sub-id> -o report --format html
+```
+
+## Advanced Analysis
+
+### Fast analysis (skip metrics and AI)
+```bash
+python main.py analyze -s <sub-id> --no-metrics --no-ai
+```
+
+### Detailed per-VM analysis
+```bash
+python main.py analyze -s <sub-id> --detailed --top 10
+```
+
+### Control Skælvox generation evolution
+```bash
+# Conservative: 1-generation leap (v3 → v4)
+python main.py analyze -s <sub-id> --leap 1
+
+# Aggressive: 3-generation leap (v3 → v6)
+python main.py analyze -s <sub-id> --leap 3
+
+# Strict mode: Only recommend target generation (no fallback)
+python main.py analyze -s <sub-id> --no-fallback
+
+# Disable generation evolution entirely
+python main.py analyze -s <sub-id> --no-evolve
+```
+
+### Adjust concurrent processing
+```bash
+# Use more workers for faster analysis (default: 10)
+python main.py analyze -s <sub-id> --workers 20
+
+# Use fewer workers for slower connections
+python main.py analyze -s <sub-id> --workers 5
+```
+
+## SKU Operations
+
+### Check SKU availability
+```bash
+python main.py check-availability --sku Standard_D16ds_v5 --region eastus2
+```
+
+### Find alternative SKUs
+```bash
+python main.py find-alternatives --sku Standard_D16ds_v5 --region eastus2 --min-similarity 70
+```
+
+### Compare regions for a VM
+```bash
+python main.py compare-regions --vm web-server-01 --resource-group production-rg
+```
+
+### Rank SKUs by specifications
+```bash
+python main.py rank-skus --vcpus 4 --memory 16 --region westeurope
+```
+
+## Automation & CI/CD
+
+### GitHub Actions workflow example
+```yaml
+- name: Analyze VMs
+  run: |
+    python main.py analyze \\
+      -s ${{ secrets.AZURE_SUBSCRIPTION_ID }} \\
+      --no-ai \\
+      --output results.csv
+```
+
+### Scheduled analysis with email
+```bash
+# cron job example (daily at 6 AM)
+0 6 * * * cd /path/to/tool && \\
+  python main.py analyze -s <sub-id> -o /reports/$(date +\\%Y\\%m\\%d).html && \\
+  mail -s "Azure VM Report" user@example.com < /reports/$(date +\\%Y\\%m\\%d).html
+```
+
+## Tips & Best Practices
+
+### 1. Start with a quick scan
+```bash
+python main.py analyze -s <sub-id> --no-metrics --top 20
+```
+
+### 2. Export to HTML for management reports
+```bash
+python main.py analyze -s <sub-id> -o executive-report.html
+```
+
+### 3. Export to CSV for detailed analysis in Excel
+```bash
+python main.py analyze -s <sub-id> -o detailed-analysis.csv
+```
+
+### 4. Focus on high-value optimizations
+```bash
+python main.py analyze -s <sub-id> --min-savings 100 --priority High
+```
+
+### 5. Test recommendations in a specific resource group first
+```bash
+python main.py analyze -s <sub-id> -g dev-rg --detailed
+```
+
+For more information, visit: https://github.com/jamelachahbar/skaelvox-vm-evolver
+"""
+    
+    console.print(Panel(
+        Markdown(examples_text),
+        title="[bold cyan]📚 Usage Examples[/bold cyan]",
+        border_style="cyan",
+        box=box.ROUNDED,
+        padding=(1, 2),
+    ))
 
 
 if __name__ == "__main__":
