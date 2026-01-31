@@ -115,7 +115,11 @@ def get_confidence_color(confidence: str) -> str:
 
 
 def create_summary_panel(report: AnalysisReport) -> Panel:
-    """Create a summary panel for the analysis report."""
+    """Create a summary panel for the analysis report.
+    
+    Note: This panel shows overall statistics from the analysis.
+    If filters are applied, the displayed results table may show fewer VMs.
+    """
     savings_color = "green" if report.total_potential_savings > 0 else "white"
     
     # Calculate additional statistics
@@ -127,6 +131,14 @@ def create_summary_panel(report: AnalysisReport) -> Panel:
     if report.total_current_cost > 0:
         savings_percentage = (report.total_potential_savings / report.total_current_cost) * 100
     
+    # Safely calculate VMs without changes (handle filtered results)
+    vms_without_changes = max(0, report.analyzed_vms - report.vms_with_recommendations)
+    
+    # Calculate optimization rate (based on original analysis before filtering)
+    optimization_rate = 0.0
+    if report.total_vms > 0:
+        optimization_rate = (report.vms_with_recommendations / report.total_vms) * 100
+    
     content = f"""
 [bold]Analysis Timestamp:[/bold] {report.timestamp.strftime('%Y-%m-%d %H:%M:%S UTC')}
 [bold]Subscription ID:[/bold] {report.subscription_id}
@@ -135,7 +147,7 @@ def create_summary_panel(report: AnalysisReport) -> Panel:
   • Total VMs Discovered: {report.total_vms}
   • VMs Analyzed: {report.analyzed_vms}
   • VMs with Recommendations: {report.vms_with_recommendations}
-  • VMs without Changes Needed: {max(0, report.analyzed_vms - report.vms_with_recommendations)}
+  • VMs without Changes Needed: {vms_without_changes}
 
 [bold cyan]💰 Cost Summary[/bold cyan]
   • Current Monthly Cost: {format_currency(report.total_current_cost)}
@@ -153,7 +165,7 @@ def create_summary_panel(report: AnalysisReport) -> Panel:
 [bold cyan]🎯 ROI Metrics[/bold cyan]
   • Monthly ROI: [{savings_color}]{format_currency(report.total_potential_savings)} / month[/{savings_color}]
   • Annual ROI: [{savings_color}]{format_currency(report.total_potential_savings * 12)} / year[/{savings_color}]
-  • Optimization Rate: [{savings_color}]{format_percent(report.vms_with_recommendations / report.total_vms * 100 if report.total_vms > 0 else 0)}[/{savings_color}] of VMs have optimization opportunities
+  • Optimization Potential: [{savings_color}]{format_percent(optimization_rate)}[/{savings_color}] of VMs have optimization opportunities
 """
     
     return Panel(
@@ -523,6 +535,10 @@ def analyze(
             include_ai=not no_ai and ai_analyzer is not None,
         )
         
+        # Store original counts before filtering for accurate statistics
+        original_total_vms = report.total_vms
+        original_vms_with_recommendations = report.vms_with_recommendations
+        
         # Apply filters to results
         filtered_results = report.results
         
@@ -537,9 +553,12 @@ def analyze(
             filtered_results = [r for r in filtered_results if r.priority == priority_normalized]
             console.print(f"[dim]Applied filter: priority = {priority_normalized}[/dim]")
         
-        # Update report with filtered results
+        # Update report with filtered results but preserve original total counts
         report.results = filtered_results
+        # Recalculate filtered count
         report.vms_with_recommendations = len([r for r in filtered_results if r.total_potential_savings > 0])
+        # Keep original total_vms and analyzed_vms for context
+        # This allows users to see "X filtered out of Y total"
         
         # Display results
         console.print()

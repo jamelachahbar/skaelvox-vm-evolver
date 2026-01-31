@@ -72,8 +72,8 @@ class ReportExporter:
                 "analyzed_vms": self.report.analyzed_vms,
                 "vms_with_recommendations": self.report.vms_with_recommendations,
                 "total_current_cost": self.report.total_current_cost,
-                "total_potential_savings": self.report.total_potential_savings,
-                "total_annual_savings": self.report.total_potential_savings * 12,
+                "total_potential_savings": self.report.total_potential_savings,  # Monthly savings
+                "total_annual_savings": self.report.total_potential_savings * 12,  # Annualized (monthly * 12)
                 "shutdown_candidates": self.report.shutdown_candidates,
                 "rightsize_candidates": self.report.rightsize_candidates,
                 "generation_upgrade_candidates": self.report.generation_upgrade_candidates,
